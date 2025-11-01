@@ -6,7 +6,6 @@ import { useGLTF } from '@react-three/drei'
 import {
   Box3,
   BoxGeometry,
-  Color,
   ConeGeometry,
   CylinderGeometry,
   Group,
@@ -23,7 +22,7 @@ import {
   type GeneratedShapeDefinition,
 } from '../generated/shapes'
 
-export type ShapeVariant = 'default' | 'silhouette' | 'ghost' | 'shadow'
+export type ShapeVariant = 'default' | 'player' | 'finale' | 'silhouette' | 'ghost' | 'shadow'
 
 export type ShapeComponentProps = {
   variant?: ShapeVariant
@@ -35,24 +34,80 @@ export type ShapeDefinition = {
   Component: ComponentType<ShapeComponentProps>
 }
 
-const materialPalette = {
-  default: new Color('#6ec1ff'),
-  silhouette: new Color('#060606'),
-  ghost: new Color('#3dd9ff'),
-  shadow: new Color('#000000'),
+type MaterialConfig = {
+  color: string
+  transparent: boolean
+  opacity: number
+  roughness: number
+  metalness: number
+  depthWrite: boolean
+  colorWrite: boolean
+  emissive?: string
+  emissiveIntensity?: number
 }
 
-function getVariantMaterial(variant: ShapeVariant | undefined) {
-  const key = variant ?? 'default'
-  const color = materialPalette[key]
-  const transparent = key === 'ghost' || key === 'default' || key === 'shadow'
-  const opacity = key === 'ghost' ? 0.25 : key === 'default' ? 0.1 : key === 'shadow' ? 0 : 1
-  const roughness = key === 'silhouette' || key === 'shadow' ? 1 : 0.35
-  const metalness = key === 'silhouette' || key === 'shadow' ? 0 : 0.2
-  const depthWrite = key === 'default' ? false : key !== 'shadow'
-  const colorWrite = key !== 'shadow'
+const materialConfigs: Record<ShapeVariant, MaterialConfig> = {
+  default: {
+    color: '#6ec1ff',
+    transparent: true,
+    opacity: 0.1,
+    roughness: 0.35,
+    metalness: 0.2,
+    depthWrite: false,
+    colorWrite: true,
+  },
+  player: {
+    color: '#ffd43f',
+    transparent: true,
+    opacity: 0.9,
+    roughness: 0.45,
+    metalness: 0.25,
+    depthWrite: true,
+    colorWrite: true,
+    emissive: '#4a2e00',
+    emissiveIntensity: 0.18,
+  },
+  finale: {
+    color: '#ffffff',
+    transparent: false,
+    opacity: 1,
+    roughness: 0.42,
+    metalness: 0.15,
+    depthWrite: true,
+    colorWrite: true,
+  },
+  silhouette: {
+    color: '#060606',
+    transparent: false,
+    opacity: 1,
+    roughness: 1,
+    metalness: 0,
+    depthWrite: true,
+    colorWrite: true,
+  },
+  ghost: {
+    color: '#3dd9ff',
+    transparent: true,
+    opacity: 0.25,
+    roughness: 0.35,
+    metalness: 0.2,
+    depthWrite: true,
+    colorWrite: true,
+  },
+  shadow: {
+    color: '#000000',
+    transparent: true,
+    opacity: 0,
+    roughness: 1,
+    metalness: 0,
+    depthWrite: false,
+    colorWrite: false,
+  },
+}
 
-  return { color, transparent, opacity, roughness, metalness, depthWrite, colorWrite }
+function getVariantMaterial(variant: ShapeVariant | undefined): MaterialConfig {
+  const key = variant ?? 'default'
+  return materialConfigs[key]
 }
 
 export function createGeneratedShapeDefinitions(
@@ -96,6 +151,8 @@ export const FinaleShape = memo(({ variant }: ShapeComponentProps) => {
           metalness: materialProps.metalness,
           depthWrite: materialProps.depthWrite,
           colorWrite: materialProps.colorWrite,
+          emissive: materialProps.emissive,
+          emissiveIntensity: materialProps.emissiveIntensity,
         })
         material.side = (mesh.material as MeshStandardMaterial | undefined)?.side ?? material.side
         mesh.material = material

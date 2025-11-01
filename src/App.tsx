@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from 'react'
+import type { CSSProperties, FormEvent, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import { Quaternion } from 'three'
@@ -13,6 +13,11 @@ import { shapeLabelFromCatalog } from './shared/shapes'
 import { useShapeSlotSpinner } from './hooks/useShapeSlotSpinner'
 import type { LobbyStatus, RoundStatus } from './shared/messages'
 import { eulerFromDeviceOrientation, toTuple } from './utils/quaternion'
+import { getPlayerColor } from './shared/playerColors'
+import slotTick from './assets/slot-tick.mp3'
+import roundWon from './assets/round-won.mp3'
+import joinLobbyChime from './assets/join-lobby.mp3'
+import leaveLobbyChime from './assets/leave-lobby.mp3'
 
 const NAME_STORAGE_KEY = 'shadow-play.displayName'
 
@@ -84,6 +89,9 @@ function HostDashboard() {
     targetShapeId: sessionState.round.shapeId,
     shapes: sessionState.shapes,
   })
+  const lastTickIdRef = useRef<string | null>(null)
+  const celebrationRoundRef = useRef<number | null>(null)
+  const lastConnectedPlayersRef = useRef<number>(sessionState.connectedPlayerCount)
 
   const shapesReady = sessionState.lobby.shapesReady
   const startDisabledReason = (() => {
@@ -105,10 +113,124 @@ function HostDashboard() {
     }
     return `${window.location.origin}/join?code=${sessionState.lobby.code}`
   }, [sessionState.lobby.code])
+  const lobbyStatus = sessionState.lobby.status
+  const roundStatus = sessionState.round.status
+  const connectedPlayers = sessionState.players
+    .filter((player) => player.connected)
+    .slice()
+    .sort((a, b) => a.slot - b.slot)
+  const showLobbyView = lobbyStatus === 'open'
+  const showGameView = lobbyStatus === 'in-progress'
+  const showResults = lobbyStatus === 'complete'
+  const statusLabel = describeLobbyStatus(
+    lobbyStatus,
+    roundStatus,
+    sessionState.round.index,
+    sessionState.round.total,
+  )
+  const shapeLabel = shapeLabelFromCatalog(sessionState.shapes, sessionState.round.shapeId)
+  const timerLabel = (() => {
+    if (roundStatus === 'countdown') {
+      return 'Spinning shapes'
+    }
+    if (roundStatus === 'active') {
+      return formatTimer(sessionState.round.remainingMs)
+    }
+    return `${sessionState.lobby.timerSeconds}s`
+  })()
+  const lobbyCodeDisplay = sessionState.lobby.code ?? '------'
+  const roundDurationMs = sessionState.round.durationSeconds * 1000
+  const timerRatio =
+    roundStatus === 'active' && roundDurationMs > 0
+      ? Math.max(0, Math.min(1, sessionState.round.remainingMs / roundDurationMs))
+      : null
+  const timerWidth = timerRatio != null ? `${(timerRatio * 100).toFixed(1)}%` : '0%'
+  const showTimerBar = timerRatio != null
+  const showCountdownOverlay = showGameView && roundStatus === 'countdown'
+
+  useEffect(() => {
+    if (device === 'desktop') {
+      const previous = lastConnectedPlayersRef.current
+      const current = sessionState.connectedPlayerCount
+      if (current !== previous) {
+        lastConnectedPlayersRef.current = current
+        if (current > previous) {
+          const audio = new Audio(joinLobbyChime)
+          audio.volume = 0.2
+          void audio.play().catch(() => {})
+        } else if (current < previous) {
+          const audio = new Audio(leaveLobbyChime)
+          audio.volume = 0.15
+          void audio.play().catch(() => {})
+        }
+      }
+    } else {
+      lastConnectedPlayersRef.current = sessionState.connectedPlayerCount
+    }
+  }, [device, sessionState.connectedPlayerCount])
+
+  useEffect(() => {
+    if (roundStatus !== 'countdown') {
+      lastTickIdRef.current = null
+      return
+    }
+    const currentId = spinnerState.currentId
+    if (!currentId) {
+      return
+    }
+    if (lastTickIdRef.current === currentId) {
+      return
+    }
+    lastTickIdRef.current = currentId
+    const audio = new Audio(slotTick)
+    audio.volume = 0.25
+    void audio.play().catch(() => {})
+  }, [roundStatus, spinnerState.currentId])
+
+  useEffect(() => {
+    if (device !== 'desktop') {
+      celebrationRoundRef.current = null
+      return
+    }
+    if (roundStatus !== 'complete') {
+      return
+    }
+    if (sessionState.round.winnerSlot == null) {
+      return
+    }
+    const roundIndex = sessionState.round.index
+    if (celebrationRoundRef.current === roundIndex) {
+      return
+    }
+    celebrationRoundRef.current = roundIndex
+    const audio = new Audio(roundWon)
+    audio.volume = 0.38
+    void audio.play().catch(() => {})
+  }, [device, roundStatus, sessionState.round.index, sessionState.round.winnerSlot])
 
   if (device === 'mobile') {
     return <Navigate to="/join" replace />
   }
+
+  const gridStyle: CSSProperties = (() => {
+    const count = connectedPlayers.length
+    if (count <= 1) {
+      return { gridTemplateColumns: 'repeat(1, minmax(0, 1fr))', gridAutoRows: '1fr' }
+    }
+    if (count === 2) {
+      return { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoRows: '1fr' }
+    }
+    if (count === 3) {
+      return { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gridAutoRows: '1fr' }
+    }
+    if (count === 4) {
+      return {
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
+      }
+    }
+    return { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoRows: '1fr' }
+  })()
 
   if (showSetup) {
     return (
@@ -156,36 +278,42 @@ function HostDashboard() {
     )
   }
 
-  const statusLabel = describeLobbyStatus(
-    sessionState.lobby.status,
-    sessionState.round.status,
-    sessionState.round.index,
-    sessionState.round.total,
-  )
-  const shapeLabel = shapeLabelFromCatalog(sessionState.shapes, sessionState.round.shapeId)
-  const timerLabel = (() => {
-    if (sessionState.round.status === 'countdown') {
-      return 'Spinning shapes'
-    }
-    if (sessionState.round.status === 'active') {
-      return formatTimer(sessionState.round.remainingMs)
-    }
-    return `${sessionState.lobby.timerSeconds}s`
-  })()
-  const connectedPlayers = sessionState.players.filter((player) => player.connected)
-  const lanesToRender = connectedPlayers.length > 0 ? connectedPlayers : []
-  const showResults = sessionState.lobby.status === 'complete'
+  const renderPlayerBubble = (player: (typeof sessionState.players)[number]) => {
+    const color = getPlayerColor(player.slot)
+    const name = player.name?.trim()
+    const displayName = name && name.length > 0 ? name : `Player ${player.slot + 1}`
+    const initial = name && name.length > 0 ? name.charAt(0).toUpperCase() : 'P'
+    return (
+      <div key={player.slot} className="lobby-player-item">
+        <div className="player-bubble" style={{ backgroundColor: color.background, color: color.text }}>
+          {initial}
+        </div>
+        <span className="lobby-player-name">{displayName}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
       <header className="hud">
         <div className="hud-left">
-          <span className={`status-pill status-${sessionState.round.status}`}>{statusLabel}</span>
-          <span className="divider" />
-          <span className="shape-label">{shapeLabel}</span>
+          <span className={`status-pill status-${roundStatus}`}>{statusLabel}</span>
           <span className="divider" />
           <span className="hud-meta">Players {sessionState.connectedPlayerCount}</span>
-          <span className="hud-meta">Timer {timerLabel}</span>
+          {sessionState.lobby.code ? (
+            <>
+              <span className="divider" />
+              <span className="hud-meta">Code {sessionState.lobby.code}</span>
+            </>
+          ) : null}
+          {showGameView ? (
+            <>
+              <span className="divider" />
+              <span className="shape-label">{shapeLabel}</span>
+              <span className="divider" />
+              <span className="hud-meta">Timer {timerLabel}</span>
+            </>
+          ) : null}
         </div>
         <div className="hud-right">
           <span className={`connection-dot ${connection}`}>{connection}</span>
@@ -210,17 +338,70 @@ function HostDashboard() {
         </div>
       </header>
 
-      {sessionState.lobby.code ? (
-        <section className="qr-card">
-          <div className="qr-code">
-            <QRPreview value={joinUrl ?? sessionState.lobby.code} />
+      {showTimerBar ? (
+        <div className="round-timer-bar">
+          <div className="round-timer-fill" style={{ width: timerWidth }} />
+        </div>
+      ) : null}
+
+      {showCountdownOverlay ? (
+        <div className="countdown-overlay">
+          <div className="countdown-overlay-backdrop" />
+          <div className="countdown-overlay-dialog">
+            <CountdownSlot spinner={spinnerState} />
           </div>
-          <div className="qr-details">
-            <span className="qr-label">Lobby code</span>
-            <span className="qr-value">{sessionState.lobby.code}</span>
-            {joinUrl ? <span className="qr-url">{joinUrl}</span> : null}
+        </div>
+      ) : null}
+
+      {showLobbyView ? (
+        <section className="lobby-layout">
+          <div className="lobby-column">
+            <h2 className="lobby-players-header">Players</h2>
+            {connectedPlayers.length > 0 ? (
+              <div className="lobby-player-grid">{connectedPlayers.map(renderPlayerBubble)}</div>
+            ) : (
+              <div className="lobby-player-empty">Waiting for players to join…</div>
+            )}
+          </div>
+          <div className="lobby-column lobby-instructions">
+            <h2>Connect your phones as controllers</h2>
+            <p>Type in the code below:</p>
+            <div className="lobby-code-block">{lobbyCodeDisplay}</div>
+            {joinUrl ? <p className="lobby-instructions-link">{joinUrl}</p> : null}
+            {sessionState.lobby.code ? (
+              <div className="lobby-qr-wrap">
+                <span className="lobby-qr-caption">Or scan:</span>
+                <div className="lobby-qr-frame">
+                  <QRPreview value={joinUrl ?? sessionState.lobby.code} />
+                </div>
+              </div>
+            ) : null}
           </div>
         </section>
+      ) : null}
+
+      {showGameView ? (
+        <main
+          className={`game-grid ${connectedPlayers.length === 0 ? 'game-grid-empty' : ''}`}
+          style={gridStyle}
+        >
+          {connectedPlayers.length === 0 ? (
+            <div className="lane-empty">No players joined yet.</div>
+          ) : (
+            connectedPlayers.map((player, index) => (
+              <PlayerLane
+                key={player.slot}
+                displayIndex={index}
+                player={player}
+                roundStatus={roundStatus}
+                shapeId={sessionState.round.shapeId ?? null}
+                targetOrientation={sessionState.round.targetOrientation}
+                isSelf={self.role === 'player' && self.slot === player.slot}
+                winnerSlot={sessionState.round.winnerSlot}
+              />
+            ))
+          )}
+        </main>
       ) : null}
 
       {showResults ? (
@@ -230,27 +411,7 @@ function HostDashboard() {
             finalMultiplier={sessionState.lobby.finalRoundMultiplier}
           />
         </section>
-      ) : (
-        <main className={`lanes ${lanesToRender.length === 0 ? 'lanes-empty' : ''}`}>
-          {lanesToRender.length === 0 ? (
-            <div className="lane-empty">No players joined yet.</div>
-          ) : (
-            lanesToRender.map((player, index) => (
-              <PlayerLane
-                key={player.slot}
-                displayIndex={index}
-                player={player}
-                roundStatus={sessionState.round.status}
-                shapeId={sessionState.round.shapeId ?? null}
-                targetOrientation={sessionState.round.targetOrientation}
-                isSelf={self.role === 'player' && self.slot === player.slot}
-                winnerSlot={sessionState.round.winnerSlot}
-                spinner={spinnerState}
-              />
-            ))
-          )}
-        </main>
-      )}
+      ) : null}
     </div>
   )
 }

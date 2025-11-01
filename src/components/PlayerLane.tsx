@@ -1,31 +1,39 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Center, Environment } from '@react-three/drei'
-import { Euler, Quaternion, Vector3, type Group } from 'three'
+import { Center } from '@react-three/drei'
+import { Euler, Quaternion, ShaderMaterial, Vector3, Mesh } from 'three'
+import type { Material } from 'three'
+import type { Group } from 'three'
 import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
 import { toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
 import { FINAL_SHAPE_ID } from '../shared/shapes'
+import { getPlayerColor } from '../shared/playerColors'
 import { getShapeDefinition } from '../shapes/catalog'
-import { SlotTicker } from './SlotTicker'
-import type { ShapeSlotSpinnerState } from '../hooks/useShapeSlotSpinner'
+import {
+  createSilhouetteFillMaterial,
+  createSilhouetteOutlineMaterial
+} from '../shaders/silhouetteMaterial'
 
-const cameraFrontPosition: [number, number, number] = [0, 0, 5]
+const cameraFrontPosition: [number, number, number] = [0, 0, 10]
+const ORTHO_ZOOM = 100
 const CAMERA_LOOK_AT: [number, number, number] = [0, 0, 0]
 const WALL_POSITION: [number, number, number] = [0, 0, -2]
 const WALL_TARGET = new Vector3(...WALL_POSITION)
 const BASE_ROTATION = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2)
+const GHOST_OFFSET_Z = -0.45
 
 type LaneSceneProps = {
   orientation: QuaternionTuple
   targetOrientation: QuaternionTuple | null
   shapeId: ShapeId | null
+  rotationLocked: boolean
 }
 
-function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) {
-  const playerRef = useRef<Group>(null)
-  const ghostRef = useRef<Group>(null)
+function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked }: LaneSceneProps) {
+  const playerRef = useRef<Group | null>(null)
+  const ghostRef = useRef<Group | null>(null)
   const orientationQuat = useMemo(() => toQuaternion(orientation), [orientation])
   const targetQuat = useMemo(
     () => (targetOrientation ? toQuaternion(targetOrientation) : null),
@@ -43,14 +51,25 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
   useEffect(() => {
     camera.position.set(...cameraFrontPosition)
     camera.lookAt(...CAMERA_LOOK_AT)
+    if ('isOrthographicCamera' in camera && camera.isOrthographicCamera) {
+      camera.zoom = ORTHO_ZOOM
+      camera.near = 0.1
+      camera.far = 100
+      camera.updateProjectionMatrix()
+    }
   }, [camera])
 
+  const isFinalShape = shapeId === FINAL_SHAPE_ID
+
   useEffect(() => {
+    if (rotationLocked) {
+      return
+    }
     if (playerRef.current) {
       const adjusted = orientationQuat.clone().multiply(BASE_ROTATION)
       playerRef.current.quaternion.copy(adjusted)
     }
-  }, [orientationQuat])
+  }, [orientationQuat, rotationLocked])
 
   useEffect(() => {
     if (ghostRef.current && targetQuat) {
@@ -59,16 +78,125 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
     }
   }, [targetQuat])
 
+  useEffect(() => {
+    const root = playerRef.current
+    if (!root) {
+      return
+    }
+
+    root.traverse((child) => {
+      const mesh = child as Mesh
+      if (!mesh.isMesh) {
+        return
+      }
+
+      mesh.receiveShadow = false
+      mesh.castShadow = isFinalShape
+    })
+  }, [isFinalShape, shapeId])
+
+  const ghostOutlineClones = useRef<Mesh[]>([])
+  const ghostFillMaterials = useRef<Material[]>([])
+  const ghostOutlineMaterials = useRef<ShaderMaterial[]>([])
+
+  useEffect(() => {
+    // cleanup previous
+    ghostOutlineClones.current.forEach((mesh) => {
+      mesh.parent?.remove(mesh)
+      mesh.geometry.dispose()
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((mat) => mat.dispose())
+      } else {
+        mesh.material?.dispose()
+      }
+    })
+    ghostOutlineClones.current = []
+    ghostFillMaterials.current.forEach((mat) => mat.dispose())
+    ghostOutlineMaterials.current.forEach((mat) => mat.dispose())
+    ghostFillMaterials.current = []
+    ghostOutlineMaterials.current = []
+
+    const ghostGroup = ghostRef.current
+    if (!ghostGroup) {
+      return
+    }
+
+    if (!isFinalShape) {
+      ghostGroup.scale.setScalar(1.035)
+      ghostGroup.position.set(0, 0, GHOST_OFFSET_Z)
+    } else {
+      ghostGroup.scale.setScalar(1)
+      ghostGroup.position.set(0, 0, 0)
+    }
+
+    ghostGroup.traverse((child) => {
+      const mesh = child as Mesh
+      if (!mesh.isMesh) {
+        return
+      }
+
+      if (isFinalShape) {
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        return
+      }
+
+      // 1) FILL — flat silhouette color
+      const fillMat = createSilhouetteFillMaterial()
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((mat) => mat.dispose())
+      } else {
+        mesh.material?.dispose()
+      }
+      mesh.material = fillMat
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      mesh.renderOrder = -2
+      ghostFillMaterials.current.push(fillMat)
+
+      // 2) OUTLINE — inflated backfaces
+      const outlineMesh = mesh.clone()
+      outlineMesh.geometry = mesh.geometry.clone()
+      const outlineMat = createSilhouetteOutlineMaterial()
+      outlineMesh.material = outlineMat
+      outlineMesh.castShadow = false
+      outlineMesh.receiveShadow = false
+      outlineMesh.renderOrder = -3
+      mesh.parent?.add(outlineMesh)
+
+      ghostOutlineClones.current.push(outlineMesh)
+      ghostOutlineMaterials.current.push(outlineMat)
+    })
+
+    return () => {
+      ghostOutlineClones.current.forEach((mesh) => {
+        mesh.parent?.remove(mesh)
+        mesh.geometry.dispose()
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((mat) => mat.dispose())
+        } else {
+          mesh.material?.dispose()
+        }
+      })
+      ghostOutlineClones.current = []
+      ghostFillMaterials.current.forEach((mat) => mat.dispose())
+      ghostOutlineMaterials.current.forEach((mat) => mat.dispose())
+      ghostFillMaterials.current = []
+      ghostOutlineMaterials.current = []
+    }
+  }, [isFinalShape, shapeId, targetQuat])
+
+
   const { Component } = getShapeDefinition(shapeId)
 
   return (
     <>
-      <color attach="background" args={['#0a0f24']} />
-      <ambientLight intensity={0.26} />
+      <color attach="background" args={['#ffffff']} />
+      <ambientLight intensity={0.72} color="#ffffff" />
       <directionalLight
         position={[0, 0, 9.4]}
-        intensity={1.8}
-        castShadow
+        intensity={isFinalShape ? 1.6 : 1.1}
+        castShadow={isFinalShape}
         shadow-mapSize={[1536, 1536]}
         shadow-camera-near={0.5}
         shadow-camera-far={20}
@@ -78,30 +206,29 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
         shadow-camera-bottom={-8}
         shadow-bias={-0.0002}
       />
-      <spotLight position={[0, 0, 9.8]} angle={0.4} intensity={0.35} penumbra={0.45} castShadow={false} />
+      <spotLight position={[0, 0, 9.8]} angle={0.42} intensity={isFinalShape ? 0.5 : 0.25} penumbra={0.6} castShadow={false} color="#f3f6ff" />
       <group ref={ghostRef} position={[0, 0, 0]} visible={Boolean(targetQuat)}>
         {targetQuat ? (
           <Center>
-            <Component variant="shadow" />
+            <Component variant={isFinalShape ? 'shadow' : 'default'} />
           </Center>
         ) : null}
       </group>
       <group ref={playerRef} position={[0, 0, 0]}>
         <Center>
-          <Component variant="default" />
+          <Component variant={isFinalShape ? 'finale' : 'player'} />
         </Center>
       </group>
       <mesh
         position={WALL_POSITION}
         rotation={[0, 0, 0]}
         scale={[wallScale[0], wallScale[1], 1]}
-        receiveShadow
+        receiveShadow={isFinalShape}
         castShadow={false}
       >
         <planeGeometry args={[1, 1]} />
-        <meshStandardMaterial color="#10183a" roughness={1} metalness={0} />
+        <meshStandardMaterial color={isFinalShape ? '#f0f3fb' : '#ffffff'} roughness={1} metalness={0} />
       </mesh>
-      <Environment preset="sunset" />
     </>
   )
 }
@@ -114,7 +241,6 @@ type PlayerLaneProps = {
   targetOrientation: QuaternionTuple | null
   isSelf: boolean
   winnerSlot: number | null
-  spinner: ShapeSlotSpinnerState
 }
 
 export function PlayerLane({
@@ -125,12 +251,23 @@ export function PlayerLane({
   targetOrientation,
   isSelf,
   winnerSlot,
-  spinner,
 }: PlayerLaneProps) {
+  const playerColor = getPlayerColor(player.slot)
+  const laneInitial = useMemo(() => {
+    if (!player.connected) {
+      return '—'
+    }
+    const name = player.name?.trim()
+    if (name && name.length > 0) {
+      return name[0]?.toUpperCase() ?? 'P'
+    }
+    return 'P'
+  }, [player.connected, player.name])
   const angleDeg = player.connected ? (player.angle * 180) / Math.PI : 0
   const percentage = Math.round(Math.min(Math.max(player.progress, 0), 1) * 100)
-  const isWinner = roundStatus === 'complete' && winnerSlot === player.slot
-  const laneTargetOrientation = player.targetOrientation ?? targetOrientation
+  const isWinner = winnerSlot != null && winnerSlot === player.slot
+  const laneMuted = winnerSlot != null && winnerSlot !== player.slot
+  const rotationLocked = (player.finished && roundStatus !== 'waiting' && roundStatus !== 'countdown') || isWinner
   const laneLabel = `Lane ${displayIndex + 1}`
   const nameLabel = player.connected
     ? (player.name && player.name.trim() ? player.name : 'Player')
@@ -188,26 +325,46 @@ export function PlayerLane({
   }
 
   return (
-    <div className={`lane ${player.connected ? 'lane-connected' : 'lane-open'} ${isSelf ? 'lane-self' : ''} ${isWinner ? 'lane-winner' : ''}`}>
+    <div
+      className={`lane ${player.connected ? 'lane-connected' : 'lane-open'} ${isSelf ? 'lane-self' : ''} ${isWinner ? 'lane-winner' : ''} ${laneMuted ? 'lane-muted' : ''}`}
+      style={{ borderColor: playerColor.background }}
+    >
       <div className="lane-header">
         <span className="lane-slot">{`${laneLabel}: ${nameLabel}`}</span>
         <span className={`lane-status ${player.connected ? 'lane-status-active' : ''}`}>{statusLabel}</span>
       </div>
-      <div className="lane-canvas" aria-hidden>
-        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 0, 0], fov: 46 }}>
-          <LaneScene orientation={player.orientation} targetOrientation={laneTargetOrientation} shapeId={shapeId} />
+      <div
+        className="lane-canvas"
+        aria-hidden
+        style={{ borderColor: playerColor.background, backgroundColor: `${playerColor.background}1a` }}
+      >
+        <div
+          className="player-bubble lane-player-bubble lane-player-bubble-overlay"
+          style={{ backgroundColor: playerColor.background, color: playerColor.text }}
+        >
+          {laneInitial}
+        </div>
+        <div
+          className="lane-score-badge"
+          style={{ borderColor: playerColor.background, color: playerColor.text, backgroundColor: `${playerColor.background}cc` }}
+        >
+          <span className="lane-score-badge-label">Score</span>
+          <span className="lane-score-badge-value">{player.score}</span>
+        </div>
+        <Canvas
+          shadows
+          orthographic
+          dpr={[1, 1.5]}
+          camera={{ position: cameraFrontPosition, zoom: ORTHO_ZOOM, near: 0.1, far: 100 }}
+        >
+          <LaneScene
+            orientation={player.orientation}
+            targetOrientation={targetOrientation}
+            shapeId={shapeId}
+            rotationLocked={rotationLocked}
+          />
         </Canvas>
-        {roundStatus === 'countdown' ? (
-          <div className="lane-slot-overlay">
-            <SlotTicker
-              previousId={spinner.previousId}
-              currentId={spinner.currentId}
-              nextId={spinner.nextId}
-              locked={spinner.locked}
-              spinning={spinner.spinning}
-            />
-          </div>
-        ) : null}
+        {laneMuted ? <div className="lane-muted-overlay" /> : null}
         {isWinner ? <div className="lane-winner-glow" /> : null}
       </div>
       <div className="lane-footer">

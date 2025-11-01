@@ -37,11 +37,22 @@ export function randomDeviceOrientationQuaternion(): Quaternion {
   return new Quaternion().setFromEuler(euler).normalize()
 }
 
-export function clampProgress(angleRadians: number): number {
+export function clampProgress(angleRadians: number, matchAngleRadians = Math.PI): number {
   const maxAngle = Math.PI
-  const normalized = Math.max(0, Math.min(1, 1 - angleRadians / maxAngle))
-  const buffered = Math.min(1, normalized / 0.95)
-  return Number(buffered.toFixed(3))
+  const cappedAngle = Math.min(Math.max(angleRadians, 0), maxAngle)
+  const baseNormalized = 1 - cappedAngle / maxAngle
+  const clampedBase = Math.max(0, Math.min(1, baseNormalized))
+
+  const cappedMatch = Math.min(Math.max(matchAngleRadians, 0.0001), maxAngle)
+  const matchNormalized = 1 - cappedMatch / maxAngle
+
+  if (matchNormalized <= 0) {
+    return Number(clampedBase.toFixed(3))
+  }
+
+  const scaled = clampedBase / matchNormalized
+  const constrained = Math.max(0, Math.min(1, scaled))
+  return Number(constrained.toFixed(3))
 }
 
 const FORWARD_VECTOR = new Vector3(0, 0, -1)

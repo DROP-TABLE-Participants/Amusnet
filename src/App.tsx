@@ -56,10 +56,12 @@ function HostDashboard() {
   const [roundsInput, setRoundsInput] = useState(sessionState.lobby.totalRounds || 3)
   const [multiplierInput, setMultiplierInput] = useState(sessionState.lobby.finalRoundMultiplier || 3)
   const [showSetup, setShowSetup] = useState(() => self.role !== 'host' || sessionState.lobby.status === 'idle')
+  const [copyFeedback, setCopyFeedback] = useState<'code' | 'url' | null>(null)
   const clickSoundRef = useRef<HTMLAudioElement | null>(null)
   const loopAudioRef = useRef<HTMLAudioElement | null>(null)
   const loopFadeTargetRef = useRef<{ volume: number; playbackRate: number } | null>(null)
   const loopContextRef = useRef({ roundStatus: sessionState.round.status, lobbyStatus: sessionState.lobby.status })
+  const copyResetTimeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (self.role === 'host' && sessionState.lobby.status !== 'idle') {
@@ -80,6 +82,14 @@ function HostDashboard() {
   }, [sessionState.lobby.timerSeconds, sessionState.lobby.totalRounds, sessionState.lobby.finalRoundMultiplier])
 
   useEffect(() => {
+    if (copyResetTimeoutRef.current != null) {
+      window.clearTimeout(copyResetTimeoutRef.current)
+      copyResetTimeoutRef.current = null
+    }
+    setCopyFeedback(null)
+  }, [sessionState.lobby.code])
+
+  useEffect(() => {
     clickSoundRef.current = typeof Audio !== 'undefined' ? new Audio(clickSfx) : null
     if (typeof Audio !== 'undefined') {
       const audio = new Audio(loopTrack)
@@ -91,6 +101,15 @@ function HostDashboard() {
     return () => {
       loopAudioRef.current?.pause()
       loopAudioRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current != null) {
+        window.clearTimeout(copyResetTimeoutRef.current)
+        copyResetTimeoutRef.current = null
+      }
     }
   }, [])
 
@@ -121,6 +140,63 @@ function HostDashboard() {
     }
   }, [])
 
+  const signalCopyFeedback = useCallback((target: 'code' | 'url') => {
+    setCopyFeedback(target)
+    if (copyResetTimeoutRef.current != null) {
+      window.clearTimeout(copyResetTimeoutRef.current)
+    }
+    copyResetTimeoutRef.current = window.setTimeout(() => {
+      setCopyFeedback((current) => (current === target ? null : current))
+      copyResetTimeoutRef.current = null
+    }, 1800)
+  }, [])
+
+  const copyToClipboard = useCallback((value: string | null, target: 'code' | 'url') => {
+    if (!value) {
+      return
+    }
+
+    const text = value
+
+    const handleSuccess = () => {
+      signalCopyFeedback(target)
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(text).then(handleSuccess).catch(() => {
+        fallbackCopy(text)
+      })
+      return
+    }
+
+    fallbackCopy(text)
+
+    function fallbackCopy(content: string) {
+      if (typeof document === 'undefined') {
+        return
+      }
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = content
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        textarea.style.top = '-9999px'
+        textarea.style.left = '-9999px'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const succeeded = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        if (succeeded) {
+          handleSuccess()
+        }
+      } catch {
+        // ignore copy failures so the UI stays quiet
+      }
+    }
+  }, [signalCopyFeedback])
+
   useEffect(() => {
     loopContextRef.current = {
       roundStatus: sessionState.round.status,
@@ -143,7 +219,7 @@ function HostDashboard() {
         const nextVolume = Math.abs(audio.volume - target.volume) < delta
           ? target.volume
           : audio.volume + Math.sign(target.volume - audio.volume) * delta
-        audio.volume = Math.max(0, Math.min(0.5, nextVolume))
+        audio.volume = Math.max(0, Math.min(0.32, nextVolume))
         audio.playbackRate += (target.playbackRate - audio.playbackRate) * 0.08
         if (Math.abs(audio.playbackRate - target.playbackRate) < 0.01) {
           audio.playbackRate = target.playbackRate
@@ -237,7 +313,9 @@ function HostDashboard() {
     }
     return `${sessionState.lobby.timerSeconds}s`
   })()
+  const hasLobbyCode = Boolean(sessionState.lobby.code)
   const lobbyCodeDisplay = sessionState.lobby.code ?? '------'
+  const codeCopyHint = copyFeedback === 'code' ? 'Copied!' : hasLobbyCode ? 'Click to copy' : 'Waiting…'
   const roundDurationMs = sessionState.round.durationSeconds * 1000
   const timerRatio =
     roundStatus === 'active' && roundDurationMs > 0
@@ -254,13 +332,13 @@ function HostDashboard() {
     }
 
     if (sessionState.lobby.status === 'complete') {
-      scheduleLoopTarget(0, 0.92)
+      scheduleLoopTarget(0, 0.9)
       return
     }
 
     if (roundStatus === 'countdown') {
       ensureLoopPlaying()
-      scheduleLoopTarget(0.48, 1)
+      scheduleLoopTarget(0.18, 1)
       return
     }
 
@@ -269,20 +347,20 @@ function HostDashboard() {
       const cutoff = 15000
       const remaining = sessionState.round.remainingMs
       const intensity = remaining <= cutoff ? Math.max(0, Math.min(1, (cutoff - remaining) / cutoff)) : 0
-      const volumeBase = 0.62
-      const targetVolume = volumeBase + intensity * 0.22
-      const targetRate = 1 + intensity * 0.36
+      const volumeBase = 0.22
+      const targetVolume = volumeBase + intensity * 0.1
+      const targetRate = 1 + intensity * 0.32
       scheduleLoopTarget(targetVolume, targetRate)
       return
     }
 
     if (roundStatus === 'complete') {
       const hasWinner = sessionState.round.winnerSlot != null
-      scheduleLoopTarget(hasWinner ? 0.24 : 0.12, 0.95)
+      scheduleLoopTarget(hasWinner ? 0.12 : 0.08, 0.95)
       return
     }
 
-    scheduleLoopTarget(0, 0.9)
+    scheduleLoopTarget(0, 0.88)
   }, [ensureLoopPlaying, roundStatus, scheduleLoopTarget, sessionState.lobby.status, sessionState.round.remainingMs, sessionState.round.winnerSlot])
 
   useEffect(() => {
@@ -513,7 +591,31 @@ function HostDashboard() {
           <div className="lobby-column lobby-instructions">
             <h2>Connect your phones as controllers</h2>
             <p>Type in the code below:</p>
-            <div className="lobby-code-block">{lobbyCodeDisplay}</div>
+            <div
+              className="lobby-code-block"
+              role={hasLobbyCode ? 'button' : undefined}
+              tabIndex={hasLobbyCode ? 0 : undefined}
+              data-clickable={hasLobbyCode}
+              data-copied={copyFeedback === 'code'}
+              onClick={() => {
+                if (!hasLobbyCode) {
+                  return
+                }
+                copyToClipboard(sessionState.lobby.code, 'code')
+              }}
+              onKeyDown={(event) => {
+                if (!hasLobbyCode) {
+                  return
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  copyToClipboard(sessionState.lobby.code, 'code')
+                }
+              }}
+            >
+              <span className="lobby-code-value">{lobbyCodeDisplay}</span>
+              <span className="lobby-copy-hint">{codeCopyHint}</span>
+            </div>
             {joinUrl ? <p className="lobby-instructions-link">{joinUrl}</p> : null}
             {sessionState.lobby.code ? (
               <div className="lobby-qr-wrap">
@@ -541,7 +643,6 @@ function HostDashboard() {
                 player={player}
                 roundStatus={roundStatus}
                 shapeId={sessionState.round.shapeId ?? null}
-                targetOrientation={sessionState.round.targetOrientation}
                 isSelf={self.role === 'player' && self.slot === player.slot}
                 winnerSlot={sessionState.round.winnerSlot}
               />

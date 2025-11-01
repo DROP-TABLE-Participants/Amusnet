@@ -30,7 +30,8 @@ import type {
 } from '../src/shared/messages'
 
 const PORT = Number(process.env.PORT ?? 8787)
-const MATCH_THRESHOLD = 0.35
+const MATCH_PROGRESS_START = 0.85
+const MATCH_PROGRESS_END = 0.95
 const CODE_LENGTH = 6
 const ROUND_TRANSITION_DELAY_MS = 2000
 const COUNTDOWN_DURATION_MS = 3000
@@ -96,6 +97,7 @@ type PlayerSlot = {
   orientation: QuaternionTuple
   angle: number
   progress: number
+  idleOrientation: QuaternionTuple
 }
 
 type RoundState = {
@@ -121,6 +123,7 @@ class Session {
     orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
     angle: Math.PI,
     progress: 0,
+    idleOrientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
   }))
   private round: RoundState = {
     status: 'waiting',
@@ -129,6 +132,7 @@ class Session {
     winnerSlot: null,
   }
   private targetQuaternion: Quaternion | null = null
+  private matchAngleThreshold = Math.PI
   private lobby = {
     status: 'idle' as LobbyStatus,
     code: null as string | null,
@@ -213,6 +217,7 @@ class Session {
       winnerSlot: null,
     }
     this.targetQuaternion = null
+    this.matchAngleThreshold = Math.PI
     this.roundEndTime = null
     this.availableShapes = Array.from(GENERATED_SHAPES)
     this.roundShapeSequence = Array.from(GENERATED_SHAPES)
@@ -261,6 +266,7 @@ class Session {
       slot.orientation = [...IDENTITY_QUATERNION]
       slot.angle = Math.PI
       slot.progress = 0
+      slot.idleOrientation = [...IDENTITY_QUATERNION]
     })
   }
 
@@ -349,6 +355,29 @@ class Session {
     })
 
     this.startNextRound()
+  }
+
+  private progressToAngle(progress: number): number {
+    const clamped = Math.max(0, Math.min(0.999, progress))
+    const normalized = clamped * 0.95
+    const angle = (1 - normalized) * Math.PI
+    return Math.max(angle, 0)
+  }
+
+  private refreshMatchThreshold() {
+    const totalRounds = Math.max(this.lobby.totalRounds, 1)
+    const roundIndex = this.lobby.currentRound > 0
+      ? Math.min(this.lobby.currentRound, totalRounds)
+      : 1
+    const mix = totalRounds === 1 ? 1 : (roundIndex - 1) / (totalRounds - 1)
+    const targetProgress = MATCH_PROGRESS_START + (MATCH_PROGRESS_END - MATCH_PROGRESS_START) * mix
+    this.matchAngleThreshold = this.progressToAngle(targetProgress)
+    log.debug('match threshold updated', {
+      round: roundIndex,
+      totalRounds,
+      targetProgress: Number(targetProgress.toFixed(3)),
+      angleRadians: Number(this.matchAngleThreshold.toFixed(3)),
+    })
   }
 
   private handleMessage(client: ClientRecord, buffer: RawData) {
@@ -486,6 +515,7 @@ class Session {
     this.pendingStartAfterShapes = false
     this.lobby.currentRound = 0
     this.lobby.status = 'open'
+    this.matchAngleThreshold = Math.PI
 
     this.players.forEach((slot) => {
       slot.ready = false
@@ -584,6 +614,7 @@ class Session {
     available.orientation = [...IDENTITY_QUATERNION]
     available.angle = Math.PI
     available.progress = 0
+    available.idleOrientation = [...IDENTITY_QUATERNION]
 
     client.role = 'player'
     client.slot = available.slot
@@ -610,6 +641,7 @@ class Session {
     slot.orientation = [...IDENTITY_QUATERNION]
     slot.angle = Math.PI
     slot.progress = 0
+    slot.idleOrientation = [...IDENTITY_QUATERNION]
 
     if (clientId) {
       const client = this.clients.get(clientId)
@@ -637,6 +669,7 @@ class Session {
     }
 
     this.lobby.currentRound += 1
+    this.refreshMatchThreshold()
 
   const isFinalRound = this.lobby.currentRound === this.lobby.totalRounds
   const scheduleIndex = this.lobby.currentRound - 1
@@ -664,15 +697,23 @@ class Session {
     this.roundEndTime = null
 
     this.players.forEach((slot) => {
+      const baseline = slot.idleOrientation
+        ? [...slot.idleOrientation] as QuaternionTuple
+        : [...IDENTITY_QUATERNION] as QuaternionTuple
+      slot.calibration = baseline
+      slot.idleOrientation = baseline
+
+      const baselineQuat = toQuaternion(baseline)
+      const targetRelative = baselineQuat.clone().invert().multiply(target.clone()).normalize()
+
+      slot.targetOrientation = toTuple(targetRelative)
+      slot.orientation = [...IDENTITY_QUATERNION]
+      slot.rawOrientation = null
       slot.finished = false
       slot.progress = 0
       slot.angle = Math.PI
-      slot.orientation = [...IDENTITY_QUATERNION]
       slot.playing = false
       slot.ready = false
-      slot.calibration = null
-      slot.targetOrientation = null
-      slot.rawOrientation = null
     })
 
     const connectedPlayers = this.players.filter((slot) => slot.clientId !== null)
@@ -914,8 +955,16 @@ class Session {
     }
 
     const absoluteOrientation = toQuaternion(payload)
+    const absoluteTuple = toTuple(absoluteOrientation)
+    slot.idleOrientation = absoluteTuple
+
+    if (this.round.status !== 'active' && this.round.status !== 'countdown') {
+      slot.rawOrientation = raw ?? null
+      return
+    }
+
     if (!slot.calibration) {
-      slot.calibration = toTuple(absoluteOrientation)
+      slot.calibration = [...absoluteTuple] as QuaternionTuple
       log.debug('calibration established for player', { slot: slotIndex })
     }
 
@@ -937,13 +986,13 @@ class Session {
       const angle = shadowAngleBetween(relativeOrientation, comparisonTarget)
       slot.angle = angle
 
-      if (!slot.finished && angle < MATCH_THRESHOLD) {
+      if (!slot.finished && angle < this.matchAngleThreshold) {
         slot.finished = true
         slot.progress = 1
         log.info('player matched target shape', { slot: slotIndex, angle })
         this.completeRound('matched', slotIndex)
       } else if (!slot.finished) {
-        slot.progress = clampProgress(angle)
+        slot.progress = clampProgress(angle, this.matchAngleThreshold)
       }
     } else {
       const baselineTarget = targetForSlot ?? new Quaternion(...IDENTITY_QUATERNION)

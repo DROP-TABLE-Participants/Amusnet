@@ -265,7 +265,6 @@ type PlayerLaneProps = {
   player: PlayerSnapshot
   roundStatus: RoundStatus
   shapeId: ShapeId | null
-  targetOrientation: QuaternionTuple | null
   isSelf: boolean
   winnerSlot: number | null
 }
@@ -274,7 +273,6 @@ export function PlayerLane({
   player,
   roundStatus,
   shapeId,
-  targetOrientation,
   isSelf,
   winnerSlot,
 }: PlayerLaneProps) {
@@ -295,6 +293,7 @@ export function PlayerLane({
   const rotationLocked = (player.finished && roundStatus !== 'waiting' && roundStatus !== 'countdown') || isWinner
   const zoomIntensity = Math.max(0, Math.min(1, (player.progress - 0.8) / 0.2))
   const snapStrength = Math.max(0, Math.min(1, (player.progress - 0.97) / 0.03))
+  const laneTargetOrientation = player.targetOrientation
   const lastLoggedQuaternion = useRef<QuaternionTuple | null>(null)
 
   useEffect(() => {
@@ -361,7 +360,7 @@ export function PlayerLane({
         >
           <LaneScene
             orientation={player.orientation}
-            targetOrientation={targetOrientation}
+            targetOrientation={laneTargetOrientation}
             shapeId={shapeId}
             rotationLocked={rotationLocked}
             zoomIntensity={zoomIntensity}

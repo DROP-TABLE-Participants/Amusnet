@@ -134,17 +134,55 @@ button {
 }
 
 .lobby-code-block {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 18px;
-  padding: 18px 24px;
+  padding: 18px 24px 34px;
   background: rgba(6, 12, 28, 0.82);
   border: 1px solid rgba(126, 196, 255, 0.38);
   font-size: clamp(1.6rem, 5vw, 2.6rem);
   font-weight: 700;
   letter-spacing: 0.38em;
   color: #cfe6ff;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.lobby-code-block[data-clickable='false'] {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.lobby-code-block:hover[data-clickable='true'] {
+  border-color: rgba(162, 238, 255, 0.75);
+  transform: translateY(-1px);
+}
+
+.lobby-code-block:focus-visible {
+  outline: 2px solid rgba(158, 234, 255, 0.6);
+  outline-offset: 4px;
+}
+
+.lobby-code-value {
+  pointer-events: none;
+}
+
+.lobby-copy-hint {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(168, 210, 255, 0.58);
+  pointer-events: none;
+}
+
+.lobby-code-block[data-copied='true'] .lobby-copy-hint {
+  color: #9eeaff;
 }
 
 .lobby-qr-wrap {

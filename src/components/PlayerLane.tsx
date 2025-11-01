@@ -6,8 +6,10 @@ import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
 import { toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
-import { DEFAULT_SHAPE_ID, FINAL_SHAPE_ID } from '../shared/shapes'
+import { FINAL_SHAPE_ID } from '../shared/shapes'
 import { getShapeDefinition } from '../shapes/catalog'
+import { SlotTicker } from './SlotTicker'
+import type { ShapeSlotSpinnerState } from '../hooks/useShapeSlotSpinner'
 
 const cameraFrontPosition: [number, number, number] = [0, 0, 5]
 const CAMERA_LOOK_AT: [number, number, number] = [0, 0, 0]
@@ -57,7 +59,7 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
     }
   }, [targetQuat])
 
-  const { Component } = getShapeDefinition(shapeId ?? DEFAULT_SHAPE_ID)
+  const { Component } = getShapeDefinition(shapeId)
 
   return (
     <>
@@ -112,13 +114,21 @@ type PlayerLaneProps = {
   targetOrientation: QuaternionTuple | null
   isSelf: boolean
   winnerSlot: number | null
-  countdownMs: number
+  spinner: ShapeSlotSpinnerState
 }
 
-export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetOrientation, isSelf, winnerSlot, countdownMs }: PlayerLaneProps) {
+export function PlayerLane({
+  player,
+  displayIndex,
+  roundStatus,
+  shapeId,
+  targetOrientation,
+  isSelf,
+  winnerSlot,
+  spinner,
+}: PlayerLaneProps) {
   const angleDeg = player.connected ? (player.angle * 180) / Math.PI : 0
   const percentage = Math.round(Math.min(Math.max(player.progress, 0), 1) * 100)
-  const countdownSeconds = roundStatus === 'countdown' ? Math.max(0, Math.ceil(countdownMs / 1000)) : null
   const isWinner = roundStatus === 'complete' && winnerSlot === player.slot
   const laneTargetOrientation = player.targetOrientation ?? targetOrientation
   const laneLabel = `Lane ${displayIndex + 1}`
@@ -187,9 +197,14 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
         <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 0, 0], fov: 46 }}>
           <LaneScene orientation={player.orientation} targetOrientation={laneTargetOrientation} shapeId={shapeId} />
         </Canvas>
-        {countdownSeconds !== null ? (
-          <div className="lane-countdown">
-            <span>{countdownSeconds}</span>
+        {roundStatus === 'countdown' ? (
+          <div className="lane-slot-overlay">
+            <SlotTicker
+              previous={spinner.previousId ? getShapeDefinition(spinner.previousId).label : ''}
+              current={spinner.currentId ? getShapeDefinition(spinner.currentId).label : ''}
+              next={spinner.nextId ? getShapeDefinition(spinner.nextId).label : ''}
+              locked={spinner.locked}
+            />
           </div>
         ) : null}
         {isWinner ? <div className="lane-winner-glow" /> : null}

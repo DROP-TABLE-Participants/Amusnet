@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { memo, useMemo } from 'react'
 import type { ComponentType } from 'react'
 import '@react-three/fiber'
@@ -54,20 +55,25 @@ function getVariantMaterial(variant: ShapeVariant | undefined) {
   return { color, transparent, opacity, roughness, metalness, depthWrite, colorWrite }
 }
 
-const GENERATED_SHAPE_DEFINITIONS: ShapeDefinition[] = GENERATED_SHAPES.map((shape) => {
-  const Component = memo(({ variant }: ShapeComponentProps) => {
-    const object = useMemo(() => buildGeneratedObject(shape, variant), [shape, variant])
-    return <primitive object={object} />
+export function createGeneratedShapeDefinitions(
+  shapes: GeneratedShapeDefinition[],
+): ShapeDefinition[] {
+  return shapes.map((shape) => {
+    const Component = memo(({ variant }: ShapeComponentProps) => {
+  // shape is stable for the lifetime of this memoized component factory
+  const object = useMemo(() => buildGeneratedObject(shape, variant), [variant])
+      return <primitive object={object} />
+    })
+    Component.displayName = `${shape.id}-shape`
+    return {
+      id: shape.id,
+      label: shape.label,
+      Component,
+    }
   })
-  Component.displayName = `${shape.id}-shape`
-  return {
-    id: shape.id,
-    label: shape.label,
-    Component,
-  }
-})
+}
 
-export const generatedShapeDefinitions = GENERATED_SHAPE_DEFINITIONS
+export const generatedShapeDefinitions = createGeneratedShapeDefinitions(GENERATED_SHAPES)
 
 export const FinaleShape = memo(({ variant }: ShapeComponentProps) => {
   const { scene } = useGLTF(FINALE_MODEL_URL)
@@ -127,7 +133,7 @@ function buildGeneratedObject(shape: GeneratedShapeDefinition, variant: ShapeVar
   const group = new Group()
 
   shape.primitives.forEach((primitive, index) => {
-  const mesh = createPrimitiveMesh(primitive, materialProps, variant !== 'shadow')
+    const mesh = createPrimitiveMesh(primitive, materialProps, variant !== 'shadow')
     if (mesh) {
       mesh.name = `${shape.id}-part-${index}`
       group.add(mesh)

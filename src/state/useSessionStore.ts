@@ -7,6 +7,8 @@ import type {
   SessionStatePayload,
   SelfSnapshot,
 } from '../shared/messages'
+import { GENERATED_SHAPES } from '../generated/shapes'
+import { updateGeneratedShapeRegistry } from '../shapes/catalog'
 
 const PLAYER_SLOTS = 3
 
@@ -17,6 +19,7 @@ const initialState = (): SessionStatePayload => ({
     timerSeconds: 60,
     totalRounds: 3,
   },
+  shapes: GENERATED_SHAPES,
   players: Array.from({ length: PLAYER_SLOTS }, (_, slot) => ({
     slot,
     connected: false,
@@ -117,6 +120,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     })
 
     socket.addEventListener('close', () => {
+      updateGeneratedShapeRegistry(GENERATED_SHAPES)
       set({ connection: 'closed', state: initialState(), self: { role: 'viewer' } })
     })
 
@@ -129,6 +133,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
 
       if (payload.type === 'session-state') {
+        updateGeneratedShapeRegistry(payload.state.shapes)
         set({ state: payload.state, self: payload.self })
       }
     })

@@ -1,5 +1,6 @@
 import type { ShapeId } from './shapes'
 import type { QuaternionTuple } from '../utils/quaternion'
+import type { GeneratedShapeDefinition } from '../generated/shapes'
 
 export type DeviceEuler = {
   alpha: number
@@ -45,6 +46,7 @@ export type LobbySnapshot = {
 
 export type SessionStatePayload = {
   lobby: LobbySnapshot
+  shapes: GeneratedShapeDefinition[]
   players: PlayerSnapshot[]
   round: RoundSnapshot
   readyCount: number

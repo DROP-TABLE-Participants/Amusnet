@@ -6,8 +6,10 @@ import { toCanvas } from 'qrcode'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import type { IDetectedBarcode } from '@yudiel/react-qr-scanner'
 import { PlayerLane } from './components/PlayerLane'
+import { CountdownSlot } from './components/CountdownSlot'
 import { useSessionStore } from './state/useSessionStore'
-import { SHAPE_LABELS } from './shared/shapes'
+import { shapeLabelFromCatalog } from './shared/shapes'
+import { useShapeSlotSpinner } from './hooks/useShapeSlotSpinner'
 import type { LobbyStatus, RoundStatus } from './shared/messages'
 import { eulerFromDeviceOrientation, toTuple } from './utils/quaternion'
 
@@ -72,6 +74,13 @@ function HostDashboard() {
     [createLobby, roundsInput, timerInput],
   )
 
+  const spinnerState = useShapeSlotSpinner({
+    roundStatus: sessionState.round.status,
+    countdownMs: sessionState.round.countdownMs,
+    targetShapeId: sessionState.round.shapeId,
+    shapes: sessionState.shapes,
+  })
+
   const startDisabled = sessionState.lobby.status !== 'open' || sessionState.connectedPlayerCount === 0
   const joinUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionState.lobby.code) {
@@ -126,10 +135,10 @@ function HostDashboard() {
     sessionState.round.index,
     sessionState.round.total,
   )
-  const shapeLabel = sessionState.round.shapeId ? SHAPE_LABELS[sessionState.round.shapeId] : 'Shape pending'
+  const shapeLabel = shapeLabelFromCatalog(sessionState.shapes, sessionState.round.shapeId)
   const timerLabel = (() => {
     if (sessionState.round.status === 'countdown') {
-      return `Starts in ${formatCountdown(sessionState.round.countdownMs)}`
+      return 'Spinning shapes'
     }
     if (sessionState.round.status === 'active') {
       return formatTimer(sessionState.round.remainingMs)
@@ -199,7 +208,7 @@ function HostDashboard() {
               targetOrientation={sessionState.round.targetOrientation}
               isSelf={self.role === 'player' && self.slot === player.slot}
               winnerSlot={sessionState.round.winnerSlot}
-              countdownMs={sessionState.round.countdownMs}
+              spinner={spinnerState}
             />
           ))
         )}
@@ -519,12 +528,19 @@ function MobilePlayerView() {
   const isComplete = sessionState.round.status === 'complete'
   const isWinner = isComplete && typeof self.slot === 'number' && sessionState.round.winnerSlot === self.slot
 
+  const countdownSpinner = useShapeSlotSpinner({
+    roundStatus: sessionState.round.status,
+    countdownMs: sessionState.round.countdownMs,
+    targetShapeId: sessionState.round.shapeId,
+    shapes: sessionState.shapes,
+  })
+
   const displayContent = (() => {
     if (lobbyInactive) {
       return <span className="mobile-message">Waiting for lobby to start</span>
     }
     if (isCountdown) {
-      return <span className="mobile-countdown">{formatCountdown(sessionState.round.countdownMs)}</span>
+      return <CountdownSlot spinner={countdownSpinner} shapes={sessionState.shapes} />
     }
     if (isActive) {
       return <span className="mobile-timer">{formatTimer(sessionState.round.remainingMs)}</span>
@@ -624,11 +640,6 @@ function formatTimer(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-}
-
-function formatCountdown(ms: number): string {
-  const seconds = Math.max(0, Math.ceil(ms / 1000))
-  return seconds.toString()
 }
 
 async function requestOrientationPermission(): Promise<boolean> {

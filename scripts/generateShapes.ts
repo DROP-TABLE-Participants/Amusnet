@@ -1,13 +1,14 @@
 #!/usr/bin/env tsx
 import 'dotenv/config'
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import process from 'node:process'
 import OpenAI from 'openai'
+import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses'
+import { customAlphabet } from 'nanoid'
+import type { GeneratedPrimitive, GeneratedShapeDefinition } from '../src/generated/shapes'
+import { PRIMITIVE_KINDS, SYSTEM_PROMPT, buildShapePrompt } from '../server/shapePrompt'
 
-const OUTPUT_PATH = path.resolve(process.cwd(), 'src/generated/shapes.ts')
 const SHAPE_COUNT = 3
-const MODEL = process.env.OPENAI_MODEL ?? 'gpt-5-mini'
+const MODEL = process.env.OPENAI_MODEL ?? 'gpt-5-nano'
+const fallbackIdGenerator = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 10)
 
 async function main() {
   const apiKey = process.env.OPENAI_API_KEY
@@ -19,12 +20,16 @@ async function main() {
 
   const responseParams = {
     model: MODEL,
-    reasoning: { effort: 'medium' },
-    input: buildPrompt(),
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
+    reasoning: { effort: 'low' },
+    input: [
+      { role: 'system', content: [{ type: 'input_text', text: SYSTEM_PROMPT }] },
+      { role: 'user', content: [{ type: 'input_text', text: buildShapePrompt(SHAPE_COUNT) }] },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
         name: 'GeneratedShapesPayload',
+        strict: true,
         schema: {
           type: 'object',
           additionalProperties: false,
@@ -40,44 +45,45 @@ async function main() {
         },
       },
     },
-  } as any
+  }
 
-  const response = await client.responses.create(responseParams)
+  const response = await client.responses.create(responseParams as unknown as ResponseCreateParamsNonStreaming)
 
   const payloadText = response.output_text
   if (!payloadText) {
     throw new Error('OpenAI response did not contain any text output')
   }
 
-  let parsed: { shapes: ShapePayload[] }
+  let parsed: ShapePayloadResponse
   try {
-    parsed = JSON.parse(payloadText) as { shapes: ShapePayload[] }
+    parsed = JSON.parse(payloadText) as ShapePayloadResponse
   } catch (error) {
     throw new Error(`Failed to parse JSON response from OpenAI: ${(error as Error).message}`)
   }
 
-  const fileContent = buildModule(parsed.shapes)
-  await fs.writeFile(OUTPUT_PATH, fileContent, 'utf8')
-  process.stdout.write(`Generated ${parsed.shapes.length} shapes into ${path.relative(process.cwd(), OUTPUT_PATH)}\n`)
+  const shapes = normalizeShapes(parsed.shapes)
+  process.stdout.write(`${JSON.stringify(shapes, numberReducer, 2)}\n`)
 }
 
-const primitiveKinds = ['sphere', 'box', 'cone', 'cylinder', 'torus'] as const
+type PrimitiveKind = (typeof PRIMITIVE_KINDS)[number]
 
-type PrimitiveKind = (typeof primitiveKinds)[number]
-
-type PrimitivePayload = {
+type RawPrimitivePayload = {
   kind: PrimitiveKind
-  position?: [number, number, number]
-  rotation?: [number, number, number]
-  scale?: number | [number, number, number]
-  args?: number[]
+  position: [number, number, number] | null
+  rotation: [number, number, number] | null
+  scale: number | [number, number, number] | null
+  args: number[] | null
 }
 
-type ShapePayload = {
-  id: `shape-${number}`
+type RawShapePayload = {
+  id: string | null
   label: string
   description: string
-  primitives: PrimitivePayload[]
+  primitives: RawPrimitivePayload[]
+}
+
+type ShapePayloadResponse = {
+  shapes: RawShapePayload[]
 }
 
 const numberTripleSchema = {
@@ -90,13 +96,13 @@ const numberTripleSchema = {
 const primitiveSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['kind'],
+  required: ['kind', 'position', 'rotation', 'scale', 'args'],
   properties: {
-    kind: { type: 'string', enum: primitiveKinds as unknown as string[] },
-    position: numberTripleSchema,
-    rotation: numberTripleSchema,
+    kind: { type: 'string', enum: PRIMITIVE_KINDS as unknown as string[] },
+    position: { anyOf: [numberTripleSchema, { type: 'null' }] },
+    rotation: { anyOf: [numberTripleSchema, { type: 'null' }] },
     scale: {
-      oneOf: [
+      anyOf: [
         { type: 'number', minimum: 0.2, maximum: 2.5 },
         {
           type: 'array',
@@ -104,13 +110,19 @@ const primitiveSchema = {
           maxItems: 3,
           items: { type: 'number', minimum: 0.2, maximum: 2.5 },
         },
+        { type: 'null' },
       ],
     },
     args: {
-      type: 'array',
-      minItems: 0,
-      maxItems: 4,
-      items: { type: 'number', minimum: 0.05, maximum: 6 },
+      anyOf: [
+        {
+          type: 'array',
+          minItems: 0,
+          maxItems: 4,
+          items: { type: 'number', minimum: 0.05, maximum: 6 },
+        },
+        { type: 'null' },
+      ],
     },
   },
 } as const
@@ -120,7 +132,12 @@ const shapeSchema = {
   additionalProperties: false,
   required: ['id', 'label', 'description', 'primitives'],
   properties: {
-    id: { type: 'string', pattern: '^shape-[1-9][0-9]*$' },
+    id: {
+      anyOf: [
+        { type: 'string', pattern: '^shape-[0-9A-Za-z-]{4,}$' },
+        { type: 'null' },
+      ],
+    },
     label: { type: 'string', minLength: 3, maxLength: 40 },
     description: { type: 'string', minLength: 16, maxLength: 160 },
     primitives: {
@@ -132,48 +149,14 @@ const shapeSchema = {
   },
 } as const
 
-function buildPrompt(): string {
-  return `Design ${SHAPE_COUNT} imaginative silhouettes for a three-lane shadow racing game.
-- Output JSON only and follow the provided schema.
-- Use creative, short labels and vivid descriptions.
-- For each shape build 4-9 primitives from the allowed set: ${primitiveKinds.join(', ')}.
-- Keep coordinates roughly within [-1.6, 1.6] so the models stay centered after normalization.
-- Use rotations in degrees.
-- Vary scale per primitive while avoiding paper-thin results.
-- Ensure every shape looks distinct and balanced when viewed from the front.`
-}
-
-function buildModule(shapes: ShapePayload[]): string {
-  const normalized = normalizeShapes(shapes)
-  const header = [
-    "export type GeneratedPrimitiveKind = 'sphere' | 'box' | 'cone' | 'cylinder' | 'torus'",
-    '',
-    'export type GeneratedPrimitive = {',
-    '  kind: GeneratedPrimitiveKind',
-    '  position?: [number, number, number]',
-    '  rotation?: [number, number, number]',
-    '  scale?: number | [number, number, number]',
-    '  args?: number[]',
-    '}',
-    '',
-    'export type GeneratedShapeDefinition = {',
-    '  id: `shape-${number}`',
-    '  label: string',
-    '  description: string',
-    '  primitives: GeneratedPrimitive[]',
-    '}',
-    '',
-  ].join('\n')
-
-  const body = JSON.stringify(normalized, numberReducer, 2)
-  return `${header}\nexport const GENERATED_SHAPES: GeneratedShapeDefinition[] = ${body} as const\n`
-}
-
-function normalizeShapes(shapes: ShapePayload[]): ShapePayload[] {
+function normalizeShapes(shapes: RawShapePayload[]): GeneratedShapeDefinition[] {
   const seen = new Set<string>()
   return shapes.map((shape, index) => {
-    const fallbackId = `shape-${index + 1}` as const
-    let id = shape.id ?? fallbackId
+    const fallbackId = `shape-${fallbackIdGenerator()}` as GeneratedShapeDefinition['id']
+    const candidate = typeof shape.id === 'string' ? shape.id.trim() : ''
+    let id = /^shape-[0-9A-Za-z-]{4,}$/.test(candidate)
+      ? (candidate as GeneratedShapeDefinition['id'])
+      : fallbackId
     if (seen.has(id)) {
       id = fallbackId
     }
@@ -181,14 +164,14 @@ function normalizeShapes(shapes: ShapePayload[]): ShapePayload[] {
 
     return {
       id,
-      label: shape.label.trim(),
+      label: shape.label.trim() || `Shape ${index + 1}`,
       description: shape.description.trim(),
       primitives: shape.primitives.map(normalizePrimitive).slice(0, 9),
     }
   })
 }
 
-function normalizePrimitive(primitive: PrimitivePayload): PrimitivePayload {
+function normalizePrimitive(primitive: RawPrimitivePayload): GeneratedPrimitive {
   return {
     kind: primitive.kind,
     position: primitive.position ? normalizeTuple(primitive.position) : undefined,
@@ -202,7 +185,7 @@ function normalizeTuple(tuple: [number, number, number]): [number, number, numbe
   return [normalizeNumber(tuple[0]), normalizeNumber(tuple[1]), normalizeNumber(tuple[2])]
 }
 
-function normalizeScale(scale: PrimitivePayload['scale']): PrimitivePayload['scale'] {
+function normalizeScale(scale: RawPrimitivePayload['scale']): GeneratedPrimitive['scale'] {
   if (scale == null) {
     return undefined
   }

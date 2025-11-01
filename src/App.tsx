@@ -85,7 +85,20 @@ function HostDashboard() {
     shapes: sessionState.shapes,
   })
 
-  const startDisabled = sessionState.lobby.status !== 'open' || sessionState.connectedPlayerCount === 0
+  const shapesReady = sessionState.lobby.shapesReady
+  const startDisabledReason = (() => {
+    if (sessionState.lobby.status !== 'open') {
+      return 'Lobby is not open yet'
+    }
+    if (sessionState.connectedPlayerCount === 0) {
+      return 'No players have joined yet'
+    }
+    if (!shapesReady) {
+      return 'Generating round shapes…'
+    }
+    return null
+  })()
+  const startDisabled = Boolean(startDisabledReason)
   const joinUrl = useMemo(() => {
     if (typeof window === 'undefined' || !sessionState.lobby.code) {
       return null
@@ -183,6 +196,7 @@ function HostDashboard() {
                 className="hud-button accent"
                 onClick={startGame}
                 disabled={startDisabled}
+                title={startDisabledReason ?? 'Start the race'}
               >
                 Start game
               </button>

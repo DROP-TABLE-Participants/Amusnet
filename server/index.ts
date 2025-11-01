@@ -927,6 +927,7 @@ class Session {
         timerSeconds: this.lobby.timerSeconds,
         totalRounds: this.lobby.totalRounds,
         finalRoundMultiplier: this.lobby.finalRoundMultiplier,
+        shapesReady: this.shapesReady,
       },
       shapes: this.availableShapes.map((shape) => ({
         id: shape.id,

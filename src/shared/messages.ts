@@ -44,6 +44,7 @@ export type LobbySnapshot = {
   timerSeconds: number
   totalRounds: number
   finalRoundMultiplier: number
+  shapesReady: boolean
 }
 
 export type SessionStatePayload = {

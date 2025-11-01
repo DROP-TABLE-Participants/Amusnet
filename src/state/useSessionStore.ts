@@ -19,6 +19,7 @@ const initialState = (): SessionStatePayload => ({
     timerSeconds: 60,
     totalRounds: 3,
     finalRoundMultiplier: 3,
+    shapesReady: true,
   },
   shapes: GENERATED_SHAPES,
   players: Array.from({ length: PLAYER_SLOTS }, (_, slot) => ({

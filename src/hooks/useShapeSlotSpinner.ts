@@ -3,6 +3,7 @@ import type { GeneratedShapeDefinition } from '../generated/shapes'
 import type { RoundStatus } from '../shared/messages'
 import { FINAL_SHAPE_ID } from '../shared/shapes'
 import type { ShapeId } from '../shared/shapes'
+import { SLOT_DECOY_SHAPE_IDS } from '../shapes/slotDecoys'
 
 type SpinnerParams = {
   roundStatus: RoundStatus
@@ -19,22 +20,73 @@ export type ShapeSlotSpinnerState = {
   spinning: boolean
 }
 
-const MIN_DURATION_MS = 3000
-const LOCK_PROGRESS = 0.82
+const MIN_DURATION_MS = 2200
+const LOCK_PROGRESS = 0.9
+const MIN_SPIN_CYCLES = 18
+const SPIN_CYCLE_MULTIPLIER = 7
+const MAX_DECOYS = 6
 
 const easeOutCubic = (value: number): number => 1 - (1 - value) ** 3
 
+const shuffleArray = <T,>(input: readonly T[]): T[] => {
+  const result = [...input]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
+    ;[result[index], result[swapIndex]] = [result[swapIndex], result[index]]
+  }
+  return result
+}
+
 export function useShapeSlotSpinner({ roundStatus, countdownMs, targetShapeId, shapes }: SpinnerParams): ShapeSlotSpinnerState {
-  const shapeIds = useMemo<ShapeId[]>(() => {
-    const ids = shapes.map((shape) => shape.id as ShapeId)
-    if (targetShapeId && !ids.includes(targetShapeId)) {
-      ids.push(targetShapeId)
+  const generatedIds = useMemo<ShapeId[]>(() => shapes.map((shape) => shape.id as ShapeId), [shapes])
+
+  const buildDecoySequence = useCallback(
+    (target: ShapeId | null): ShapeId[] => {
+      const decoyPool = shuffleArray(SLOT_DECOY_SHAPE_IDS)
+      const generatedPool = shuffleArray(generatedIds.filter((id) => (target ? id !== target : true)))
+      const combined = [...decoyPool, ...generatedPool]
+      const sequence: ShapeId[] = []
+
+      for (const id of combined) {
+        if (!sequence.includes(id)) {
+          sequence.push(id)
+        }
+        if (sequence.length >= MAX_DECOYS) {
+          break
+        }
+      }
+
+      if (sequence.length === 0) {
+        sequence.push(FINAL_SHAPE_ID)
+      }
+
+      return sequence
+    },
+    [generatedIds],
+  )
+
+  const [shapeIds, setShapeIds] = useState<ShapeId[]>(() => buildDecoySequence(targetShapeId))
+  const previousStatusRef = useRef<RoundStatus | null>(null)
+
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current
+    if (roundStatus === 'countdown' && previousStatus !== 'countdown') {
+      setShapeIds(buildDecoySequence(targetShapeId))
     }
-    if (ids.length === 0) {
-      ids.push(FINAL_SHAPE_ID)
+    previousStatusRef.current = roundStatus
+  }, [buildDecoySequence, roundStatus, targetShapeId])
+
+  useEffect(() => {
+    if (!targetShapeId) {
+      return
     }
-    return ids
-  }, [shapes, targetShapeId])
+    setShapeIds((current) => {
+      if (current.includes(targetShapeId)) {
+        return current
+      }
+      return [...current, targetShapeId]
+    })
+  }, [targetShapeId])
 
   const shapeCount = shapeIds.length
   const fallbackIndex = shapeCount > 0 ? 0 : -1
@@ -48,7 +100,7 @@ export function useShapeSlotSpinner({ roundStatus, countdownMs, targetShapeId, s
   }, [fallbackIndex, shapeIds, targetShapeId])
 
   const computeState = useCallback(
-  (index: number, locked: boolean, spinning: boolean): ShapeSlotSpinnerState => {
+    (index: number, locked: boolean, spinning: boolean): ShapeSlotSpinnerState => {
       if (shapeCount === 0 || index < 0) {
         return {
           currentId: null,
@@ -72,7 +124,9 @@ export function useShapeSlotSpinner({ roundStatus, countdownMs, targetShapeId, s
     [shapeCount, shapeIds],
   )
 
-  const [state, setState] = useState<ShapeSlotSpinnerState>(() => computeState(targetIndex, roundStatus !== 'countdown', false))
+  const [state, setState] = useState<ShapeSlotSpinnerState>(() =>
+    computeState(targetIndex, roundStatus !== 'countdown', false),
+  )
   const animationRef = useRef<number | null>(null)
   const startTimeRef = useRef<number>(0)
   const initialCountdownRef = useRef<number>(MIN_DURATION_MS)
@@ -119,7 +173,7 @@ export function useShapeSlotSpinner({ roundStatus, countdownMs, targetShapeId, s
     const totalDuration = Math.max(initialCountdownRef.current, MIN_DURATION_MS)
     startTimeRef.current = performance.now()
     const finalIndex = targetIndex >= 0 ? targetIndex : 0
-    const spinCycles = Math.max(6, shapeCount * 3)
+    const spinCycles = Math.max(MIN_SPIN_CYCLES, shapeCount * SPIN_CYCLE_MULTIPLIER)
 
     const updateFrame = (timestamp: number) => {
       const elapsed = timestamp - startTimeRef.current

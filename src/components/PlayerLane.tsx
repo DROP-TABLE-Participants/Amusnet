@@ -200,10 +200,11 @@ export function PlayerLane({
         {roundStatus === 'countdown' ? (
           <div className="lane-slot-overlay">
             <SlotTicker
-              previous={spinner.previousId ? getShapeDefinition(spinner.previousId).label : ''}
-              current={spinner.currentId ? getShapeDefinition(spinner.currentId).label : ''}
-              next={spinner.nextId ? getShapeDefinition(spinner.nextId).label : ''}
+              previousId={spinner.previousId}
+              currentId={spinner.currentId}
+              nextId={spinner.nextId}
               locked={spinner.locked}
+              spinning={spinner.spinning}
             />
           </div>
         ) : null}

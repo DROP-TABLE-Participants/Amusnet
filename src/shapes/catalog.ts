@@ -3,6 +3,7 @@ import type { ShapeDefinition } from './definitions'
 import type { ShapeId } from '../shared/shapes'
 import { FINAL_SHAPE_ID, FINAL_SHAPE_LABEL } from '../shared/shapes'
 import { GENERATED_SHAPES, type GeneratedShapeDefinition } from '../generated/shapes'
+import { SLOT_DECOY_SHAPES } from './slotDecoys'
 
 const registry = new Map<ShapeId, ShapeDefinition>()
 let defaultGeneratedShapeId: ShapeId = generatedShapeDefinitions[0]?.id ?? FINAL_SHAPE_ID
@@ -17,7 +18,9 @@ function setRegistryEntries(definitions: ShapeDefinition[]) {
   })
 }
 
-setRegistryEntries(generatedShapeDefinitions)
+const slotDecoyDefinitions = createGeneratedShapeDefinitions(SLOT_DECOY_SHAPES)
+
+setRegistryEntries([...generatedShapeDefinitions, ...slotDecoyDefinitions])
 
 registry.set(FINAL_SHAPE_ID, {
   id: FINAL_SHAPE_ID,
@@ -33,8 +36,8 @@ export function updateGeneratedShapeRegistry(shapes: GeneratedShapeDefinition[])
   })
   const source = shapes.length > 0 ? shapes : GENERATED_SHAPES
   const definitions = createGeneratedShapeDefinitions(source)
-  setRegistryEntries(definitions)
-  defaultGeneratedShapeId = definitions[0]?.id ?? FINAL_SHAPE_ID
+  setRegistryEntries([...definitions, ...slotDecoyDefinitions])
+  defaultGeneratedShapeId = definitions[0]?.id ?? slotDecoyDefinitions[0]?.id ?? FINAL_SHAPE_ID
 }
 
 export function getShapeDefinition(id: ShapeId | null | undefined): ShapeDefinition {

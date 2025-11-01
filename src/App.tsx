@@ -540,7 +540,7 @@ function MobilePlayerView() {
       return <span className="mobile-message">Waiting for lobby to start</span>
     }
     if (isCountdown) {
-      return <CountdownSlot spinner={countdownSpinner} shapes={sessionState.shapes} />
+  return <CountdownSlot spinner={countdownSpinner} />
     }
     if (isActive) {
       return <span className="mobile-timer">{formatTimer(sessionState.round.remainingMs)}</span>

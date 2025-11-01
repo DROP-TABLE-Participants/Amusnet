@@ -17,6 +17,7 @@ export type PlayerSnapshot = {
   ready: boolean
   playing: boolean
   finished: boolean
+  score: number
   name: string | null
   angle: number
   progress: number
@@ -42,6 +43,7 @@ export type LobbySnapshot = {
   code: string | null
   timerSeconds: number
   totalRounds: number
+  finalRoundMultiplier: number
 }
 
 export type SessionStatePayload = {
@@ -66,7 +68,7 @@ export type ServerMessage = {
 
 export type ClientMessage =
   | { type: 'register'; device: 'mobile' | 'desktop' }
-  | { type: 'create-lobby'; timerSeconds: number; totalRounds: number }
+  | { type: 'create-lobby'; timerSeconds: number; totalRounds: number; finalMultiplier: number }
   | { type: 'join-lobby'; code: string; name: string }
   | { type: 'start-game' }
   | { type: 'leave-slot' }

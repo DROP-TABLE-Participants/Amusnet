@@ -88,6 +88,7 @@ type PlayerSlot = {
   ready: boolean
   playing: boolean
   finished: boolean
+  score: number
   name: string | null
   calibration: QuaternionTuple | null
   targetOrientation: QuaternionTuple | null
@@ -112,6 +113,7 @@ class Session {
     ready: false,
     playing: false,
     finished: false,
+    score: 0,
     name: null,
     calibration: null,
     targetOrientation: null,
@@ -132,6 +134,7 @@ class Session {
     code: null as string | null,
     timerSeconds: 60,
     totalRounds: 3,
+    finalRoundMultiplier: 3,
     currentRound: 0,
   }
   private hostId: string | null = null
@@ -200,6 +203,7 @@ class Session {
       code: null,
       timerSeconds: 60,
       totalRounds: 3,
+      finalRoundMultiplier: 3,
       currentRound: 0,
     }
     this.round = {
@@ -249,6 +253,7 @@ class Session {
       slot.ready = false
       slot.playing = false
       slot.finished = false
+      slot.score = 0
     slot.name = null
       slot.calibration = null
       slot.targetOrientation = null
@@ -364,8 +369,9 @@ class Session {
           clientId: client.id,
           timerSeconds: message.timerSeconds,
           totalRounds: message.totalRounds,
+          finalMultiplier: message.finalMultiplier,
         })
-        this.handleCreateLobby(client, message.timerSeconds, message.totalRounds)
+        this.handleCreateLobby(client, message.timerSeconds, message.totalRounds, message.finalMultiplier)
         break
       case 'join-lobby':
         log.info('join lobby request received', {
@@ -397,15 +403,17 @@ class Session {
     }
   }
 
-  private handleCreateLobby(client: ClientRecord, timerSeconds: number, totalRounds: number) {
+  private handleCreateLobby(client: ClientRecord, timerSeconds: number, totalRounds: number, finalMultiplier: number) {
     if (client.device !== 'desktop') {
       log.warn('lobby creation rejected for non-desktop client', { clientId: client.id })
       return
     }
     const safeTimer = Number.isFinite(timerSeconds) && timerSeconds > 0 ? Math.round(timerSeconds) : 60
     const safeRounds = Number.isFinite(totalRounds) ? Math.round(totalRounds) : 3
+    const safeMultiplier = Number.isFinite(finalMultiplier) ? Math.round(finalMultiplier) : 3
     const clampedRounds = Math.min(10, Math.max(3, safeRounds))
     const clampedTimer = Math.min(300, Math.max(15, safeTimer))
+    const clampedMultiplier = Math.min(10, Math.max(1, safeMultiplier))
 
     if (this.hostId && this.hostId !== client.id && this.lobby.status !== 'idle' && this.lobby.status !== 'complete') {
       log.warn('lobby creation blocked because another host already active', { clientId: client.id })
@@ -431,6 +439,7 @@ class Session {
       code: generateLobbyCode(),
       timerSeconds: clampedTimer,
       totalRounds: clampedRounds,
+      finalRoundMultiplier: clampedMultiplier,
       currentRound: 0,
     }
 
@@ -441,6 +450,7 @@ class Session {
       code: this.lobby.code,
       timerSeconds: clampedTimer,
       totalRounds: clampedRounds,
+      finalRoundMultiplier: clampedMultiplier,
     })
 
     this.prepareShapes(clampedRounds)
@@ -519,6 +529,7 @@ class Session {
     available.ready = false
     available.playing = false
     available.finished = false
+    available.score = 0
     available.name = sanitizeDisplayName(name)
     available.calibration = null
     available.targetOrientation = null
@@ -544,6 +555,7 @@ class Session {
     slot.ready = false
     slot.playing = false
     slot.finished = false
+  slot.score = 0
     slot.name = null
     slot.calibration = null
     slot.targetOrientation = null
@@ -744,6 +756,21 @@ class Session {
       slot.playing = false
     })
 
+    if (_reason === 'matched' && typeof winnerSlot === 'number') {
+      const winner = this.players[winnerSlot]
+      if (winner) {
+        const isFinalRound = this.round.shapeId === FINAL_SHAPE_ID
+        const points = isFinalRound ? this.lobby.finalRoundMultiplier : 1
+        winner.score += points
+        log.info('awarded round points', {
+          slot: winnerSlot,
+          points,
+          totalScore: winner.score,
+          isFinalRound,
+        })
+      }
+    }
+
     log.info('round complete', {
       reason: _reason,
       winnerSlot: typeof winnerSlot === 'number' ? winnerSlot : null,
@@ -899,6 +926,7 @@ class Session {
         code: this.lobby.code,
         timerSeconds: this.lobby.timerSeconds,
         totalRounds: this.lobby.totalRounds,
+        finalRoundMultiplier: this.lobby.finalRoundMultiplier,
       },
       shapes: this.availableShapes.map((shape) => ({
         id: shape.id,
@@ -920,6 +948,7 @@ class Session {
         ready: slot.ready,
         playing: slot.playing,
         finished: slot.finished,
+  score: slot.score,
         name: slot.name,
         angle: slot.angle,
         progress: slot.progress,

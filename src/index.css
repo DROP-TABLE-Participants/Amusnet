@@ -571,6 +571,111 @@ button {
   border-radius: 10px;
 }
 
+.results-section {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 2rem 0 3rem;
+}
+
+.results-card {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.results-dashboard {
+  width: min(680px, 100%);
+  background: rgba(7, 12, 30, 0.78);
+  border: 1px solid rgba(121, 255, 226, 0.22);
+  border-radius: 20px;
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 12px 48px rgba(9, 14, 22, 0.6);
+  backdrop-filter: blur(8px);
+  color: #e3faff;
+}
+
+.results-dashboard-compact {
+  padding: 1.25rem 1.5rem;
+  width: min(360px, 100%);
+}
+
+.results-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.results-header h2 {
+  font-size: 1.5rem;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+}
+
+.results-meta {
+  font-size: 0.85rem;
+  color: rgba(187, 255, 241, 0.72);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.results-row {
+  display: grid;
+  grid-template-columns: 3rem 1fr auto;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(10, 18, 42, 0.65);
+  border: 1px solid rgba(91, 145, 255, 0.22);
+  box-shadow: inset 0 0 12px rgba(58, 105, 255, 0.18);
+}
+
+.results-dashboard-compact .results-row {
+  grid-template-columns: 2rem 1fr auto;
+}
+
+.results-rank {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: rgba(121, 255, 226, 0.92);
+}
+
+.results-dashboard-compact .results-rank {
+  font-size: 1.05rem;
+}
+
+.results-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.results-dashboard-compact .results-name {
+  font-size: 0.95rem;
+}
+
+.results-score {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #9eeaff;
+}
+
+.results-dashboard-compact .results-score {
+  font-size: 1.1rem;
+}
+
 .slot-ticker-locked .slot-ticker-indicator {
   display: none;
 }

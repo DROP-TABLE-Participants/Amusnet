@@ -7,6 +7,7 @@ import { Scanner } from '@yudiel/react-qr-scanner'
 import type { IDetectedBarcode } from '@yudiel/react-qr-scanner'
 import { PlayerLane } from './components/PlayerLane'
 import { CountdownSlot } from './components/CountdownSlot'
+import { ResultsDashboard } from './components/ResultsDashboard'
 import { useSessionStore } from './state/useSessionStore'
 import { shapeLabelFromCatalog } from './shared/shapes'
 import { useShapeSlotSpinner } from './hooks/useShapeSlotSpinner'
@@ -45,6 +46,7 @@ function HostDashboard() {
   const startGame = useSessionStore((state) => state.startGame)
   const [timerInput, setTimerInput] = useState(sessionState.lobby.timerSeconds || 60)
   const [roundsInput, setRoundsInput] = useState(sessionState.lobby.totalRounds || 3)
+  const [multiplierInput, setMultiplierInput] = useState(sessionState.lobby.finalRoundMultiplier || 3)
   const [showSetup, setShowSetup] = useState(() => self.role !== 'host' || sessionState.lobby.status === 'idle')
 
   useEffect(() => {
@@ -62,16 +64,18 @@ function HostDashboard() {
   useEffect(() => {
     setTimerInput(sessionState.lobby.timerSeconds || 60)
     setRoundsInput(sessionState.lobby.totalRounds || 3)
-  }, [sessionState.lobby.timerSeconds, sessionState.lobby.totalRounds])
+    setMultiplierInput(sessionState.lobby.finalRoundMultiplier || 3)
+  }, [sessionState.lobby.timerSeconds, sessionState.lobby.totalRounds, sessionState.lobby.finalRoundMultiplier])
 
   const handleCreateLobby = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const safeRounds = Math.max(3, Math.min(10, Math.round(roundsInput)))
       const safeTimer = Math.max(15, Math.min(300, Math.round(timerInput)))
-      createLobby(safeTimer, safeRounds)
+      const safeMultiplier = Math.max(1, Math.min(10, Math.round(multiplierInput)))
+      createLobby(safeTimer, safeRounds, safeMultiplier)
     },
-    [createLobby, roundsInput, timerInput],
+    [createLobby, roundsInput, timerInput, multiplierInput],
   )
 
   const spinnerState = useShapeSlotSpinner({
@@ -120,6 +124,16 @@ function HostDashboard() {
                 onChange={(event) => setRoundsInput(Number(event.target.value))}
               />
             </label>
+            <label className="input-group">
+              <span>Final figure multiplier</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={multiplierInput}
+                onChange={(event) => setMultiplierInput(Number(event.target.value))}
+              />
+            </label>
             <button type="submit" className="hud-button accent host-submit">
               Create lobby
             </button>
@@ -147,6 +161,7 @@ function HostDashboard() {
   })()
   const connectedPlayers = sessionState.players.filter((player) => player.connected)
   const lanesToRender = connectedPlayers.length > 0 ? connectedPlayers : []
+  const showResults = sessionState.lobby.status === 'complete'
 
   return (
     <div className="page">
@@ -194,25 +209,34 @@ function HostDashboard() {
         </section>
       ) : null}
 
-      <main className={`lanes ${lanesToRender.length === 0 ? 'lanes-empty' : ''}`}>
-        {lanesToRender.length === 0 ? (
-          <div className="lane-empty">No players joined yet.</div>
-        ) : (
-          lanesToRender.map((player, index) => (
-            <PlayerLane
-              key={player.slot}
-              displayIndex={index}
-              player={player}
-              roundStatus={sessionState.round.status}
-              shapeId={sessionState.round.shapeId ?? null}
-              targetOrientation={sessionState.round.targetOrientation}
-              isSelf={self.role === 'player' && self.slot === player.slot}
-              winnerSlot={sessionState.round.winnerSlot}
-              spinner={spinnerState}
-            />
-          ))
-        )}
-      </main>
+      {showResults ? (
+        <section className="results-section">
+          <ResultsDashboard
+            players={sessionState.players}
+            finalMultiplier={sessionState.lobby.finalRoundMultiplier}
+          />
+        </section>
+      ) : (
+        <main className={`lanes ${lanesToRender.length === 0 ? 'lanes-empty' : ''}`}>
+          {lanesToRender.length === 0 ? (
+            <div className="lane-empty">No players joined yet.</div>
+          ) : (
+            lanesToRender.map((player, index) => (
+              <PlayerLane
+                key={player.slot}
+                displayIndex={index}
+                player={player}
+                roundStatus={sessionState.round.status}
+                shapeId={sessionState.round.shapeId ?? null}
+                targetOrientation={sessionState.round.targetOrientation}
+                isSelf={self.role === 'player' && self.slot === player.slot}
+                winnerSlot={sessionState.round.winnerSlot}
+                spinner={spinnerState}
+              />
+            ))
+          )}
+        </main>
+      )}
     </div>
   )
 }
@@ -236,6 +260,7 @@ function JoinScreen() {
   const [searchParams] = useSearchParams()
   const lastAutoCodeRef = useRef<string | null>(null)
   const nameInputRef = useRef<HTMLInputElement | null>(null)
+  const showResults = sessionState.lobby.status === 'complete'
 
   useEffect(() => {
     const paramCode = searchParams.get('code')
@@ -330,51 +355,62 @@ function JoinScreen() {
       {showMobilePanel ? (
         <MobilePlayerView />
       ) : (
-        <section className="join-card">
-          <form className="join-form" onSubmit={handleSubmit}>
-            <label className="input-group">
-              <span>Enter 6 digit code</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={codeInput}
-                onChange={(event) => {
-                  setCodeInput(event.target.value.replace(/[^0-9]/g, ''))
-                  setValidationError(null)
-                }}
+        <>
+          <section className="join-card">
+            <form className="join-form" onSubmit={handleSubmit}>
+              <label className="input-group">
+                <span>Enter 6 digit code</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={codeInput}
+                  onChange={(event) => {
+                    setCodeInput(event.target.value.replace(/[^0-9]/g, ''))
+                    setValidationError(null)
+                  }}
+                />
+              </label>
+              <label className="input-group">
+                <span>Display name</span>
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  maxLength={32}
+                  value={nameInput}
+                  placeholder="Pick a nickname"
+                  autoComplete="name"
+                  onChange={(event) => {
+                    setNameInput(event.target.value)
+                    setValidationError(null)
+                  }}
+                />
+              </label>
+              {validationError ? <p className="join-error">{validationError}</p> : null}
+              <div className="join-actions">
+                <button type="submit" className="hud-button accent">
+                  Join lobby
+                </button>
+                <button
+                  type="button"
+                  className="hud-button ghost"
+                  onClick={() => setScanning(true)}
+                >
+                  Scan QR
+                </button>
+              </div>
+            </form>
+          </section>
+          {showResults ? (
+            <section className="results-card">
+              <ResultsDashboard
+                players={sessionState.players}
+                finalMultiplier={sessionState.lobby.finalRoundMultiplier}
+                compact
               />
-            </label>
-            <label className="input-group">
-              <span>Display name</span>
-              <input
-                ref={nameInputRef}
-                type="text"
-                maxLength={32}
-                value={nameInput}
-                placeholder="Pick a nickname"
-                autoComplete="name"
-                onChange={(event) => {
-                  setNameInput(event.target.value)
-                  setValidationError(null)
-                }}
-              />
-            </label>
-            {validationError ? <p className="join-error">{validationError}</p> : null}
-            <div className="join-actions">
-              <button type="submit" className="hud-button accent">
-                Join lobby
-              </button>
-              <button
-                type="button"
-                className="hud-button ghost"
-                onClick={() => setScanning(true)}
-              >
-                Scan QR
-              </button>
-            </div>
-          </form>
-        </section>
+            </section>
+          ) : null}
+        </>
       )}
 
       {scanning ? (
@@ -536,6 +572,9 @@ function MobilePlayerView() {
   })
 
   const displayContent = (() => {
+    if (sessionState.lobby.status === 'complete') {
+      return <span className="mobile-message">Game complete</span>
+    }
     if (lobbyInactive) {
       return <span className="mobile-message">Waiting for lobby to start</span>
     }

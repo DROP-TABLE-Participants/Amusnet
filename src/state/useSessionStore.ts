@@ -18,6 +18,7 @@ const initialState = (): SessionStatePayload => ({
     code: null,
     timerSeconds: 60,
     totalRounds: 3,
+    finalRoundMultiplier: 3,
   },
   shapes: GENERATED_SHAPES,
   players: Array.from({ length: PLAYER_SLOTS }, (_, slot) => ({
@@ -26,6 +27,7 @@ const initialState = (): SessionStatePayload => ({
     ready: false,
     playing: false,
     finished: false,
+  score: 0,
     name: null,
     angle: Math.PI,
     progress: 0,
@@ -58,7 +60,7 @@ type SessionStore = {
   state: SessionStatePayload
   self: SelfSnapshot
   connect: () => void
-  createLobby: (timerSeconds: number, totalRounds: number) => void
+  createLobby: (timerSeconds: number, totalRounds: number, finalMultiplier: number) => void
   joinLobby: (code: string, name: string) => void
   startGame: () => void
   leaveSlot: () => void
@@ -138,8 +140,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       }
     })
   },
-  createLobby: (timerSeconds: number, totalRounds: number) => {
-    sendMessage({ type: 'create-lobby', timerSeconds, totalRounds })
+  createLobby: (timerSeconds: number, totalRounds: number, finalMultiplier: number) => {
+    sendMessage({ type: 'create-lobby', timerSeconds, totalRounds, finalMultiplier })
   },
   joinLobby: (code: string, name: string) => {
     sendMessage({ type: 'join-lobby', code, name })

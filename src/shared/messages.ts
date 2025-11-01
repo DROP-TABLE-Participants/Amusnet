@@ -1,6 +1,12 @@
 import type { ShapeId } from './shapes'
 import type { QuaternionTuple } from '../utils/quaternion'
 
+export type DeviceEuler = {
+  alpha: number
+  beta: number
+  gamma: number
+}
+
 export type RoundStatus = 'waiting' | 'countdown' | 'active' | 'complete'
 export type LobbyStatus = 'idle' | 'open' | 'in-progress' | 'complete'
 
@@ -13,6 +19,8 @@ export type PlayerSnapshot = {
   angle: number
   progress: number
   orientation: QuaternionTuple
+  targetOrientation: QuaternionTuple | null
+  rawOrientation: DeviceEuler | null
 }
 
 export type RoundSnapshot = {
@@ -59,4 +67,8 @@ export type ClientMessage =
   | { type: 'join-lobby'; code: string }
   | { type: 'start-game' }
   | { type: 'leave-slot' }
-  | { type: 'orientation'; orientation: QuaternionTuple }
+  | {
+      type: 'orientation'
+      orientation: QuaternionTuple
+      rawOrientation?: DeviceEuler
+    }

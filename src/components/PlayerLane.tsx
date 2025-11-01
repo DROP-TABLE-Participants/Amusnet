@@ -107,6 +107,7 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
   const percentage = Math.round(Math.min(Math.max(player.progress, 0), 1) * 100)
   const countdownSeconds = roundStatus === 'countdown' ? Math.max(0, Math.ceil(countdownMs / 1000)) : null
   const isWinner = roundStatus === 'complete' && winnerSlot === player.slot
+  const laneTargetOrientation = player.targetOrientation ?? targetOrientation
 
   let statusLabel = 'Open'
   if (player.connected) {
@@ -133,7 +134,7 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
       </div>
       <div className="lane-canvas" aria-hidden>
         <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 0, 0], fov: 46 }}>
-          <LaneScene orientation={player.orientation} targetOrientation={targetOrientation} shapeId={shapeId} />
+          <LaneScene orientation={player.orientation} targetOrientation={laneTargetOrientation} shapeId={shapeId} />
         </Canvas>
         {countdownSeconds !== null ? (
           <div className="lane-countdown">

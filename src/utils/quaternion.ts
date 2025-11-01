@@ -49,15 +49,19 @@ export function eulerFromDeviceOrientation(
   beta: number,
   gamma: number,
 ): Euler {
-  // Device orientation uses Z-X'-Y'' intrinsic rotations. This approximates a camera-facing front orientation.
   const radAlpha = degToRad(alpha)
   const radBeta = degToRad(beta)
   const radGamma = degToRad(gamma)
 
-  const euler = new Euler(0, 0, 0, 'YXZ')
-  euler.y = radAlpha
-  euler.x = radBeta
-  euler.z = -radGamma
+  const euler = new Euler(0, 0, 0, 'XZY')
+  euler.x = radAlpha
+  euler.z = -radBeta
+  euler.y = radGamma
+
+  console.log(
+    `[device-orientation] alpha: ${alpha.toFixed(1)}, beta: ${beta.toFixed(1)}, gamma: ${gamma.toFixed(1)}`,
+  )
+
   return euler
 }
 

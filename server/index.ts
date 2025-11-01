@@ -22,6 +22,7 @@ import type {
   ServerMessage,
   SessionStatePayload,
   SelfSnapshot,
+  DeviceEuler,
 } from '../src/shared/messages'
 
 const PORT = Number(process.env.PORT ?? 8787)
@@ -52,6 +53,8 @@ type PlayerSlot = {
   playing: boolean
   finished: boolean
   calibration: QuaternionTuple | null
+  targetOrientation: QuaternionTuple | null
+  rawOrientation: DeviceEuler | null
   orientation: QuaternionTuple
   angle: number
   progress: number
@@ -73,6 +76,8 @@ class Session {
     playing: false,
     finished: false,
     calibration: null,
+    targetOrientation: null,
+    rawOrientation: null,
     orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
     angle: Math.PI,
     progress: 0,
@@ -189,6 +194,8 @@ class Session {
       slot.playing = false
       slot.finished = false
       slot.calibration = null
+      slot.targetOrientation = null
+      slot.rawOrientation = null
       slot.orientation = [...IDENTITY_QUATERNION]
       slot.angle = Math.PI
       slot.progress = 0
@@ -225,7 +232,7 @@ class Session {
         break
       case 'orientation':
         if (client.role === 'player' && client.device === 'mobile' && typeof client.slot === 'number') {
-          this.updateOrientation(client.slot, message.orientation)
+          this.updateOrientation(client.slot, message.orientation, message.rawOrientation)
         }
         break
       default:
@@ -315,6 +322,8 @@ class Session {
     available.playing = false
     available.finished = false
   available.calibration = null
+  available.targetOrientation = null
+  available.rawOrientation = null
     available.orientation = [...IDENTITY_QUATERNION]
     available.angle = Math.PI
     available.progress = 0
@@ -332,6 +341,8 @@ class Session {
     slot.playing = false
     slot.finished = false
     slot.calibration = null
+  slot.targetOrientation = null
+  slot.rawOrientation = null
     slot.orientation = [...IDENTITY_QUATERNION]
     slot.angle = Math.PI
     slot.progress = 0
@@ -374,6 +385,8 @@ class Session {
       slot.playing = false
       slot.ready = false
       slot.calibration = null
+      slot.targetOrientation = null
+      slot.rawOrientation = null
     })
 
     const connectedPlayers = this.players.filter((slot) => slot.clientId !== null)
@@ -563,14 +576,13 @@ class Session {
     }
   }
 
-  private updateOrientation(slotIndex: number, payload: QuaternionTuple) {
+  private updateOrientation(slotIndex: number, payload: QuaternionTuple, raw?: DeviceEuler) {
     const slot = this.players[slotIndex]
     if (!slot || slot.clientId === null) {
       return
     }
 
     const absoluteOrientation = toQuaternion(payload)
-
     if (!slot.calibration) {
       slot.calibration = toTuple(absoluteOrientation)
     }
@@ -580,10 +592,17 @@ class Session {
       : new Quaternion(...IDENTITY_QUATERNION)
     const relativeOrientation = calibrationQuat.clone().invert().multiply(absoluteOrientation).normalize()
 
+    const targetForSlot = this.targetQuaternion
+      ? calibrationQuat.clone().invert().multiply(this.targetQuaternion.clone()).normalize()
+      : null
+
+    slot.rawOrientation = raw ?? null
     slot.orientation = toTuple(relativeOrientation)
+    slot.targetOrientation = targetForSlot ? toTuple(targetForSlot) : null
 
     if (this.round.status === 'active' && this.targetQuaternion) {
-      const angle = relativeOrientation.angleTo(this.targetQuaternion)
+      const comparisonTarget = targetForSlot ?? this.targetQuaternion
+      const angle = relativeOrientation.angleTo(comparisonTarget)
       slot.angle = angle
 
       if (!slot.finished && angle < MATCH_THRESHOLD) {
@@ -594,7 +613,8 @@ class Session {
         slot.progress = clampProgress(angle)
       }
     } else {
-      slot.angle = relativeOrientation.angleTo(new Quaternion(...IDENTITY_QUATERNION))
+      const baselineTarget = targetForSlot ?? new Quaternion(...IDENTITY_QUATERNION)
+      slot.angle = relativeOrientation.angleTo(baselineTarget)
       if (!slot.finished) {
         slot.progress = 0
       }
@@ -627,6 +647,12 @@ class Session {
         angle: slot.angle,
         progress: slot.progress,
         orientation: [...slot.orientation] as QuaternionTuple,
+        targetOrientation: slot.targetOrientation
+          ? [...slot.targetOrientation] as QuaternionTuple
+          : null,
+        rawOrientation: slot.rawOrientation
+          ? { ...slot.rawOrientation }
+          : null,
       })),
       round: {
         status: this.round.status,

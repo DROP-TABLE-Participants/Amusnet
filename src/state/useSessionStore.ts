@@ -26,6 +26,8 @@ const initialState = (): SessionStatePayload => ({
     angle: Math.PI,
     progress: 0,
     orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
+    targetOrientation: null,
+    rawOrientation: null,
   })),
   round: {
     status: 'waiting',

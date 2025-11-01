@@ -13,7 +13,7 @@ import {
   toTuple,
   type QuaternionTuple,
 } from '../src/utils/quaternion'
-import { randomShapeId } from '../src/shared/shapes'
+import { FINAL_SHAPE_ID, randomShapeId } from '../src/shared/shapes'
 import type { ShapeId } from '../src/shared/shapes'
 import type {
   ClientMessage,
@@ -382,7 +382,8 @@ class Session {
 
     this.lobby.currentRound += 1
 
-    const shapeId = randomShapeId()
+  const isFinalRound = this.lobby.currentRound === this.lobby.totalRounds
+  const shapeId = isFinalRound ? FINAL_SHAPE_ID : randomShapeId()
     const target = randomDeviceOrientationQuaternion()
 
     this.round = {

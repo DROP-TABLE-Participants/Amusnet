@@ -1,7 +1,8 @@
 import { memo, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import '@react-three/fiber'
-import { Color, ExtrudeGeometry, Shape } from 'three'
+import { useGLTF } from '@react-three/drei'
+import { Box3, Color, ExtrudeGeometry, Mesh, MeshStandardMaterial, Shape, Vector3 } from 'three'
 import type { ShapeId } from '../shared/shapes'
 
 export type ShapeVariant = 'default' | 'silhouette' | 'ghost' | 'shadow'
@@ -23,7 +24,7 @@ const materialPalette = {
   shadow: new Color('#000000'),
 }
 
-function useVariantMaterial(variant: ShapeVariant | undefined) {
+function getVariantMaterial(variant: ShapeVariant | undefined) {
   const key = variant ?? 'default'
   const color = materialPalette[key]
   const transparent = key === 'ghost' || key === 'default' || key === 'shadow'
@@ -37,7 +38,7 @@ function useVariantMaterial(variant: ShapeVariant | undefined) {
 }
 
 export const CatShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = useVariantMaterial(variant)
+  const materialProps = getVariantMaterial(variant)
 
   return (
     <group>
@@ -79,7 +80,7 @@ export const CatShape = memo(({ variant }: ShapeComponentProps) => {
 CatShape.displayName = 'CatShape'
 
 export const StarShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = useVariantMaterial(variant)
+  const materialProps = getVariantMaterial(variant)
 
   const geometry = useMemo(() => {
     const spikes = 5
@@ -117,7 +118,7 @@ export const StarShape = memo(({ variant }: ShapeComponentProps) => {
 StarShape.displayName = 'StarShape'
 
 export const AirplaneShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = useVariantMaterial(variant)
+  const materialProps = getVariantMaterial(variant)
 
   return (
     <group>
@@ -151,3 +152,56 @@ export const AirplaneShape = memo(({ variant }: ShapeComponentProps) => {
   )
 })
 AirplaneShape.displayName = 'AirplaneShape'
+
+export const FinaleShape = memo(({ variant }: ShapeComponentProps) => {
+  const { scene } = useGLTF(FINALE_MODEL_URL)
+
+  const prepared = useMemo(() => {
+    const clone = scene.clone(true)
+    const materialProps = getVariantMaterial(variant)
+    const bounds = new Box3()
+    const sizeVector = new Vector3()
+    const centerVector = new Vector3()
+
+    clone.traverse((child) => {
+      if ((child as Mesh).isMesh) {
+        const mesh = child as Mesh
+        const material = new MeshStandardMaterial({
+          color: materialProps.color,
+          transparent: materialProps.transparent,
+          opacity: materialProps.opacity,
+          roughness: materialProps.roughness,
+          metalness: materialProps.metalness,
+          depthWrite: materialProps.depthWrite,
+          colorWrite: materialProps.colorWrite,
+        })
+        material.side = (mesh.material as MeshStandardMaterial | undefined)?.side ?? material.side
+        mesh.material = material
+        mesh.castShadow = true
+        mesh.receiveShadow = variant !== 'shadow'
+      }
+    })
+    clone.updateMatrixWorld(true)
+    bounds.setFromObject(clone)
+    bounds.getSize(sizeVector)
+    const maxDimension = Math.max(sizeVector.x, sizeVector.y, sizeVector.z)
+    const targetSize = 2.4
+    if (maxDimension > 0) {
+      const scale = targetSize / maxDimension
+      clone.scale.setScalar(scale)
+      clone.updateMatrixWorld(true)
+    }
+
+    bounds.setFromObject(clone)
+    bounds.getCenter(centerVector)
+    clone.position.sub(centerVector)
+    return clone
+  }, [scene, variant])
+
+  return <primitive object={prepared} />
+})
+FinaleShape.displayName = 'FinaleShape'
+
+const FINALE_MODEL_URL = new URL('./five_shape.glb', import.meta.url).href
+
+useGLTF.preload(FINALE_MODEL_URL)

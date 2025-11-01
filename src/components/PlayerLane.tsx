@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { Center, Environment } from '@react-three/drei'
-import { Quaternion, Vector3, type Group } from 'three'
+import { Euler, Quaternion, Vector3, type Group } from 'three'
 import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
 import { toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
+import { FINAL_SHAPE_ID } from '../shared/shapes'
 import { getShapeDefinition } from '../shapes/catalog'
 
 const cameraFrontPosition: [number, number, number] = [0, 0, 5]
@@ -124,6 +125,40 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
   const nameLabel = player.connected
     ? (player.name && player.name.trim() ? player.name : 'Player')
     : 'Open slot'
+  const lastLoggedQuaternion = useRef<QuaternionTuple | null>(null)
+
+  useEffect(() => {
+    if (shapeId !== FINAL_SHAPE_ID) {
+      lastLoggedQuaternion.current = null
+      return
+    }
+    if (!player.connected) {
+      return
+    }
+    const current = player.orientation
+    const previous = lastLoggedQuaternion.current
+    const threshold = 0.0005
+    const hasChanged =
+      !previous || current.some((value, index) => Math.abs(value - previous[index]) > threshold)
+    if (!hasChanged) {
+      return
+    }
+    lastLoggedQuaternion.current = [...current] as QuaternionTuple
+
+    const quaternion = toQuaternion(current)
+    const euler = new Euler().setFromQuaternion(quaternion.clone(), 'XYZ')
+    const degreesFactor = 180 / Math.PI
+
+    console.log('[Finale orientation]', {
+      slot: player.slot,
+      quaternion: current.map((value) => Number(value.toFixed(6))),
+      eulerDegrees: {
+        x: Number((euler.x * degreesFactor).toFixed(2)),
+        y: Number((euler.y * degreesFactor).toFixed(2)),
+        z: Number((euler.z * degreesFactor).toFixed(2)),
+      },
+    })
+  }, [player.connected, player.orientation, player.slot, shapeId])
 
   let statusLabel = 'Open'
   if (player.connected) {

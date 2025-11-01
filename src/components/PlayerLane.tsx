@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Center } from '@react-three/drei'
-import { Euler, Quaternion, ShaderMaterial, Vector3, Mesh } from 'three'
+import { Euler, MathUtils, Quaternion, ShaderMaterial, Vector3, Mesh } from 'three'
 import type { Material } from 'three'
 import type { Group } from 'three'
 import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
@@ -23,15 +23,18 @@ const WALL_POSITION: [number, number, number] = [0, 0, -2]
 const WALL_TARGET = new Vector3(...WALL_POSITION)
 const BASE_ROTATION = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2)
 const GHOST_OFFSET_Z = -0.45
+const MAX_ZOOM = 145
 
 type LaneSceneProps = {
   orientation: QuaternionTuple
   targetOrientation: QuaternionTuple | null
   shapeId: ShapeId | null
   rotationLocked: boolean
+  zoomIntensity: number
+  snapStrength: number
 }
 
-function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked }: LaneSceneProps) {
+function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked, zoomIntensity, snapStrength }: LaneSceneProps) {
   const playerRef = useRef<Group | null>(null)
   const ghostRef = useRef<Group | null>(null)
   const orientationQuat = useMemo(() => toQuaternion(orientation), [orientation])
@@ -61,15 +64,22 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked }: 
 
   const isFinalShape = shapeId === FINAL_SHAPE_ID
 
+  const displayQuaternion = useMemo(() => {
+    if (!targetQuat || rotationLocked || snapStrength <= 0) {
+      return orientationQuat
+    }
+    const blend = Math.min(1, snapStrength * 1.15)
+    return orientationQuat.clone().slerp(targetQuat.clone(), blend).normalize()
+  }, [orientationQuat, rotationLocked, snapStrength, targetQuat])
+
   useEffect(() => {
-    if (rotationLocked) {
+    if (!playerRef.current) {
       return
     }
-    if (playerRef.current) {
-      const adjusted = orientationQuat.clone().multiply(BASE_ROTATION)
-      playerRef.current.quaternion.copy(adjusted)
-    }
-  }, [orientationQuat, rotationLocked])
+    const baseQuat = rotationLocked ? orientationQuat : displayQuaternion
+    const adjusted = baseQuat.clone().multiply(BASE_ROTATION)
+    playerRef.current.quaternion.copy(adjusted)
+  }, [displayQuaternion, orientationQuat, rotationLocked])
 
   useEffect(() => {
     if (ghostRef.current && targetQuat) {
@@ -77,6 +87,24 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked }: 
       ghostRef.current.quaternion.copy(adjusted)
     }
   }, [targetQuat])
+
+  const zoomIntensityRef = useRef(0)
+  useEffect(() => {
+    zoomIntensityRef.current = zoomIntensity
+  }, [zoomIntensity])
+
+  useFrame((_, delta) => {
+    if (!('isOrthographicCamera' in camera) || !camera.isOrthographicCamera) {
+      return
+    }
+    const effectiveIntensity = rotationLocked ? 0 : zoomIntensityRef.current
+    const targetZoom = ORTHO_ZOOM + effectiveIntensity * (MAX_ZOOM - ORTHO_ZOOM)
+    const nextZoom = MathUtils.damp(camera.zoom, targetZoom, 6, delta)
+    if (Math.abs(nextZoom - camera.zoom) > 0.001) {
+      camera.zoom = nextZoom
+      camera.updateProjectionMatrix()
+    }
+  })
 
   useEffect(() => {
     const root = playerRef.current
@@ -235,7 +263,6 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked }: 
 
 type PlayerLaneProps = {
   player: PlayerSnapshot
-  displayIndex: number
   roundStatus: RoundStatus
   shapeId: ShapeId | null
   targetOrientation: QuaternionTuple | null
@@ -245,7 +272,6 @@ type PlayerLaneProps = {
 
 export function PlayerLane({
   player,
-  displayIndex,
   roundStatus,
   shapeId,
   targetOrientation,
@@ -263,15 +289,12 @@ export function PlayerLane({
     }
     return 'P'
   }, [player.connected, player.name])
-  const angleDeg = player.connected ? (player.angle * 180) / Math.PI : 0
   const percentage = Math.round(Math.min(Math.max(player.progress, 0), 1) * 100)
   const isWinner = winnerSlot != null && winnerSlot === player.slot
   const laneMuted = winnerSlot != null && winnerSlot !== player.slot
   const rotationLocked = (player.finished && roundStatus !== 'waiting' && roundStatus !== 'countdown') || isWinner
-  const laneLabel = `Lane ${displayIndex + 1}`
-  const nameLabel = player.connected
-    ? (player.name && player.name.trim() ? player.name : 'Player')
-    : 'Open slot'
+  const zoomIntensity = Math.max(0, Math.min(1, (player.progress - 0.8) / 0.2))
+  const snapStrength = Math.max(0, Math.min(1, (player.progress - 0.97) / 0.03))
   const lastLoggedQuaternion = useRef<QuaternionTuple | null>(null)
 
   useEffect(() => {
@@ -307,32 +330,11 @@ export function PlayerLane({
     })
   }, [player.connected, player.orientation, player.slot, shapeId])
 
-  let statusLabel = 'Open'
-  if (player.connected) {
-    if (roundStatus === 'countdown') {
-      statusLabel = 'Ready'
-    } else if (roundStatus === 'active') {
-      statusLabel = player.finished ? 'Matched' : 'Racing'
-    } else if (roundStatus === 'complete') {
-      if (isWinner) {
-        statusLabel = 'Winner'
-      } else {
-        statusLabel = player.finished ? 'Matched' : 'Finished'
-      }
-    } else {
-      statusLabel = 'Joined'
-    }
-  }
-
   return (
     <div
       className={`lane ${player.connected ? 'lane-connected' : 'lane-open'} ${isSelf ? 'lane-self' : ''} ${isWinner ? 'lane-winner' : ''} ${laneMuted ? 'lane-muted' : ''}`}
       style={{ borderColor: playerColor.background }}
     >
-      <div className="lane-header">
-        <span className="lane-slot">{`${laneLabel}: ${nameLabel}`}</span>
-        <span className={`lane-status ${player.connected ? 'lane-status-active' : ''}`}>{statusLabel}</span>
-      </div>
       <div
         className="lane-canvas"
         aria-hidden
@@ -362,17 +364,21 @@ export function PlayerLane({
             targetOrientation={targetOrientation}
             shapeId={shapeId}
             rotationLocked={rotationLocked}
+            zoomIntensity={zoomIntensity}
+            snapStrength={snapStrength}
           />
         </Canvas>
         {laneMuted ? <div className="lane-muted-overlay" /> : null}
         {isWinner ? <div className="lane-winner-glow" /> : null}
-      </div>
-      <div className="lane-footer">
-        <span className="lane-angle">{player.connected ? `${angleDeg.toFixed(1)}°` : '--°'}</span>
-        <div className="lane-progress">
-          <div className="lane-progress-fill" style={{ width: `${percentage}%` }} />
+
+        <div className="lane-footer-container">
+          <div className="lane-footer" style={{ borderColor: playerColor.background, color: playerColor.text, backgroundColor: `${playerColor.background}cc` }}>
+            <div className="lane-progress">
+              <div className="lane-progress-fill" style={{ width: `${percentage}%` }} />
+            </div>
+            <span className="lane-progress-label">{player.connected ? `${percentage}%` : '0%'}</span>
+          </div>
         </div>
-        <span className="lane-progress-label">{player.connected ? `${percentage}%` : '0%'}</span>
       </div>
     </div>
   )

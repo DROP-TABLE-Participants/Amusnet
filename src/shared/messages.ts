@@ -72,6 +72,7 @@ export type ClientMessage =
   | { type: 'create-lobby'; timerSeconds: number; totalRounds: number; finalMultiplier: number }
   | { type: 'join-lobby'; code: string; name: string }
   | { type: 'start-game' }
+  | { type: 'restart-game' }
   | { type: 'leave-slot' }
   | {
       type: 'orientation'

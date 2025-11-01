@@ -107,7 +107,7 @@ type RoundState = {
 
 class Session {
   private clients = new Map<string, ClientRecord>()
-  private players: PlayerSlot[] = Array.from({ length: 3 }, (_, slot) => ({
+  private players: PlayerSlot[] = Array.from({ length: 4 }, (_, slot) => ({
     slot,
     clientId: null,
     ready: false,
@@ -384,6 +384,10 @@ class Session {
         log.info('start game requested', { clientId: client.id })
         this.handleStartGame(client)
         break
+      case 'restart-game':
+        log.info('restart game requested', { clientId: client.id })
+        this.handleRestartGame(client)
+        break
       case 'leave-slot':
         if (client.role === 'player' && typeof client.slot === 'number') {
           log.info('player leaving slot', { clientId: client.id, slot: client.slot })
@@ -454,6 +458,49 @@ class Session {
     })
 
     this.prepareShapes(clampedRounds)
+    this.broadcastState()
+  }
+
+  private handleRestartGame(client: ClientRecord) {
+    if (client.id !== this.hostId) {
+      log.warn('restart game rejected for non-host', { clientId: client.id })
+      return
+    }
+    if (this.lobby.status !== 'complete') {
+      log.warn('restart game rejected due to lobby status', { clientId: client.id, status: this.lobby.status })
+      return
+    }
+
+    log.info('restarting lobby for new game', { code: this.lobby.code })
+
+    this.clearRoundTimers()
+    this.round = {
+      status: 'waiting',
+      shapeId: null,
+      targetOrientation: null,
+      winnerSlot: null,
+    }
+    this.targetQuaternion = null
+    this.roundEndTime = null
+    this.countdownEndTime = null
+    this.pendingStartAfterShapes = false
+    this.lobby.currentRound = 0
+    this.lobby.status = 'open'
+
+    this.players.forEach((slot) => {
+      slot.ready = false
+      slot.playing = false
+      slot.finished = false
+      slot.score = 0
+      slot.calibration = null
+      slot.targetOrientation = null
+      slot.rawOrientation = null
+      slot.orientation = [...IDENTITY_QUATERNION]
+      slot.angle = Math.PI
+      slot.progress = 0
+    })
+
+    this.prepareShapes(this.lobby.totalRounds)
     this.broadcastState()
   }
 

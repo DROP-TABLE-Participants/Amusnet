@@ -10,7 +10,7 @@ import type {
 import { GENERATED_SHAPES } from '../generated/shapes'
 import { updateGeneratedShapeRegistry } from '../shapes/catalog'
 
-const PLAYER_SLOTS = 3
+const PLAYER_SLOTS = 4
 
 const initialState = (): SessionStatePayload => ({
   lobby: {
@@ -64,6 +64,7 @@ type SessionStore = {
   createLobby: (timerSeconds: number, totalRounds: number, finalMultiplier: number) => void
   joinLobby: (code: string, name: string) => void
   startGame: () => void
+  restartGame: () => void
   leaveSlot: () => void
   sendOrientation: (orientation: QuaternionTuple) => void
 }
@@ -149,6 +150,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
   startGame: () => {
     sendMessage({ type: 'start-game' })
+  },
+  restartGame: () => {
+    sendMessage({ type: 'restart-game' })
   },
   leaveSlot: () => {
     sendMessage({ type: 'leave-slot' })

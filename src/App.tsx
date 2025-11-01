@@ -16,6 +16,8 @@ import { eulerFromDeviceOrientation, toTuple } from './utils/quaternion'
 import { getPlayerColor } from './shared/playerColors'
 import slotTick from './assets/slot-tick.mp3'
 import roundWon from './assets/round-won.mp3'
+import clickSfx from './assets/click.mp3'
+import loopTrack from './assets/loop.mp3'
 import joinLobbyChime from './assets/join-lobby.mp3'
 import leaveLobbyChime from './assets/leave-lobby.mp3'
 
@@ -49,10 +51,15 @@ function HostDashboard() {
   const device = useSessionStore((state) => state.device)
   const createLobby = useSessionStore((state) => state.createLobby)
   const startGame = useSessionStore((state) => state.startGame)
+  const restartGame = useSessionStore((state) => state.restartGame)
   const [timerInput, setTimerInput] = useState(sessionState.lobby.timerSeconds || 60)
   const [roundsInput, setRoundsInput] = useState(sessionState.lobby.totalRounds || 3)
   const [multiplierInput, setMultiplierInput] = useState(sessionState.lobby.finalRoundMultiplier || 3)
   const [showSetup, setShowSetup] = useState(() => self.role !== 'host' || sessionState.lobby.status === 'idle')
+  const clickSoundRef = useRef<HTMLAudioElement | null>(null)
+  const loopAudioRef = useRef<HTMLAudioElement | null>(null)
+  const loopFadeTargetRef = useRef<{ volume: number; playbackRate: number } | null>(null)
+  const loopContextRef = useRef({ roundStatus: sessionState.round.status, lobbyStatus: sessionState.lobby.status })
 
   useEffect(() => {
     if (self.role === 'host' && sessionState.lobby.status !== 'idle') {
@@ -72,15 +79,106 @@ function HostDashboard() {
     setMultiplierInput(sessionState.lobby.finalRoundMultiplier || 3)
   }, [sessionState.lobby.timerSeconds, sessionState.lobby.totalRounds, sessionState.lobby.finalRoundMultiplier])
 
+  useEffect(() => {
+    clickSoundRef.current = typeof Audio !== 'undefined' ? new Audio(clickSfx) : null
+    if (typeof Audio !== 'undefined') {
+      const audio = new Audio(loopTrack)
+      audio.loop = true
+      audio.volume = 0
+      audio.playbackRate = 1
+      loopAudioRef.current = audio
+    }
+    return () => {
+      loopAudioRef.current?.pause()
+      loopAudioRef.current = null
+    }
+  }, [])
+
+  const playClick = useCallback(() => {
+    const audio = clickSoundRef.current
+    if (!audio) {
+      return
+    }
+    audio.currentTime = 0
+    void audio.play().catch(() => {})
+  }, [])
+
+  const scheduleLoopTarget = useCallback((volume: number, playbackRate: number) => {
+    loopFadeTargetRef.current = {
+      volume: Math.max(0, Math.min(1, volume)),
+      playbackRate: Math.max(0.4, Math.min(2.4, playbackRate)),
+    }
+  }, [])
+
+  const ensureLoopPlaying = useCallback(() => {
+    const audio = loopAudioRef.current
+    if (!audio) {
+      return
+    }
+    if (audio.paused) {
+      audio.currentTime = 0
+      void audio.play().catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    loopContextRef.current = {
+      roundStatus: sessionState.round.status,
+      lobbyStatus: sessionState.lobby.status,
+    }
+  }, [sessionState.lobby.status, sessionState.round.status])
+
+  useEffect(() => {
+    const audio = loopAudioRef.current
+    if (!audio) {
+      return
+    }
+
+    let rafId: number | null = null
+
+    const tick = () => {
+      const target = loopFadeTargetRef.current
+      if (target) {
+        const delta = 0.02
+        const nextVolume = Math.abs(audio.volume - target.volume) < delta
+          ? target.volume
+          : audio.volume + Math.sign(target.volume - audio.volume) * delta
+        audio.volume = Math.max(0, Math.min(0.5, nextVolume))
+        audio.playbackRate += (target.playbackRate - audio.playbackRate) * 0.08
+        if (Math.abs(audio.playbackRate - target.playbackRate) < 0.01) {
+          audio.playbackRate = target.playbackRate
+        }
+        if (audio.volume === target.volume && Math.abs(audio.playbackRate - target.playbackRate) < 0.01) {
+          loopFadeTargetRef.current = null
+        }
+      } else if (audio.volume < 0.01) {
+        const context = loopContextRef.current
+        if (context.roundStatus !== 'active' && context.roundStatus !== 'countdown') {
+          audio.pause()
+        }
+      }
+      rafId = window.requestAnimationFrame(tick)
+    }
+
+    rafId = window.requestAnimationFrame(tick)
+
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+      }
+    }
+  }, [])
+
   const handleCreateLobby = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const safeRounds = Math.max(3, Math.min(10, Math.round(roundsInput)))
       const safeTimer = Math.max(15, Math.min(300, Math.round(timerInput)))
       const safeMultiplier = Math.max(1, Math.min(10, Math.round(multiplierInput)))
+      playClick()
       createLobby(safeTimer, safeRounds, safeMultiplier)
     },
-    [createLobby, roundsInput, timerInput, multiplierInput],
+    [createLobby, multiplierInput, playClick, roundsInput, timerInput],
   )
 
   const spinnerState = useShapeSlotSpinner({
@@ -92,6 +190,7 @@ function HostDashboard() {
   const lastTickIdRef = useRef<string | null>(null)
   const celebrationRoundRef = useRef<number | null>(null)
   const lastConnectedPlayersRef = useRef<number>(sessionState.connectedPlayerCount)
+
 
   const shapesReady = sessionState.lobby.shapesReady
   const startDisabledReason = (() => {
@@ -147,6 +246,44 @@ function HostDashboard() {
   const timerWidth = timerRatio != null ? `${(timerRatio * 100).toFixed(1)}%` : '0%'
   const showTimerBar = timerRatio != null
   const showCountdownOverlay = showGameView && roundStatus === 'countdown'
+
+  useEffect(() => {
+    const audio = loopAudioRef.current
+    if (!audio) {
+      return
+    }
+
+    if (sessionState.lobby.status === 'complete') {
+      scheduleLoopTarget(0, 0.92)
+      return
+    }
+
+    if (roundStatus === 'countdown') {
+      ensureLoopPlaying()
+      scheduleLoopTarget(0.48, 1)
+      return
+    }
+
+    if (roundStatus === 'active') {
+      ensureLoopPlaying()
+      const cutoff = 15000
+      const remaining = sessionState.round.remainingMs
+      const intensity = remaining <= cutoff ? Math.max(0, Math.min(1, (cutoff - remaining) / cutoff)) : 0
+      const volumeBase = 0.62
+      const targetVolume = volumeBase + intensity * 0.22
+      const targetRate = 1 + intensity * 0.36
+      scheduleLoopTarget(targetVolume, targetRate)
+      return
+    }
+
+    if (roundStatus === 'complete') {
+      const hasWinner = sessionState.round.winnerSlot != null
+      scheduleLoopTarget(hasWinner ? 0.24 : 0.12, 0.95)
+      return
+    }
+
+    scheduleLoopTarget(0, 0.9)
+  }, [ensureLoopPlaying, roundStatus, scheduleLoopTarget, sessionState.lobby.status, sessionState.round.remainingMs, sessionState.round.winnerSlot])
 
   useEffect(() => {
     if (device === 'desktop') {
@@ -207,6 +344,7 @@ function HostDashboard() {
     audio.volume = 0.38
     void audio.play().catch(() => {})
   }, [device, roundStatus, sessionState.round.index, sessionState.round.winnerSlot])
+
 
   if (device === 'mobile') {
     return <Navigate to="/join" replace />
@@ -322,16 +460,25 @@ function HostDashboard() {
               <button
                 type="button"
                 className="hud-button accent"
-                onClick={startGame}
+                onClick={() => {
+                  playClick()
+                  ensureLoopPlaying()
+                  startGame()
+                }}
                 disabled={startDisabled}
                 title={startDisabledReason ?? 'Start the race'}
               >
                 Start game
               </button>
               {sessionState.lobby.status === 'complete' ? (
-                <button type="button" className="hud-button ghost" onClick={() => setShowSetup(true)}>
-                  Create new lobby
-                </button>
+                <div className="hud-finish-actions">
+                  <button type="button" className="hud-button accent" onClick={restartGame}>
+                    Play again
+                  </button>
+                  <button type="button" className="hud-button ghost" onClick={() => setShowSetup(true)}>
+                    Create new lobby
+                  </button>
+                </div>
               ) : null}
             </>
           )}
@@ -388,10 +535,9 @@ function HostDashboard() {
           {connectedPlayers.length === 0 ? (
             <div className="lane-empty">No players joined yet.</div>
           ) : (
-            connectedPlayers.map((player, index) => (
+            connectedPlayers.map((player) => (
               <PlayerLane
                 key={player.slot}
-                displayIndex={index}
                 player={player}
                 roundStatus={roundStatus}
                 shapeId={sessionState.round.shapeId ?? null}

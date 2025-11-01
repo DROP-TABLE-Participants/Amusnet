@@ -23,6 +23,7 @@ const initialState = (): SessionStatePayload => ({
     ready: false,
     playing: false,
     finished: false,
+    name: null,
     angle: Math.PI,
     progress: 0,
     orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
@@ -55,7 +56,7 @@ type SessionStore = {
   self: SelfSnapshot
   connect: () => void
   createLobby: (timerSeconds: number, totalRounds: number) => void
-  joinLobby: (code: string) => void
+  joinLobby: (code: string, name: string) => void
   startGame: () => void
   leaveSlot: () => void
   sendOrientation: (orientation: QuaternionTuple) => void
@@ -135,8 +136,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   createLobby: (timerSeconds: number, totalRounds: number) => {
     sendMessage({ type: 'create-lobby', timerSeconds, totalRounds })
   },
-  joinLobby: (code: string) => {
-    sendMessage({ type: 'join-lobby', code })
+  joinLobby: (code: string, name: string) => {
+    sendMessage({ type: 'join-lobby', code, name })
   },
   startGame: () => {
     sendMessage({ type: 'start-game' })

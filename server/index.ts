@@ -31,6 +31,18 @@ const MATCH_THRESHOLD = 0.35
 const CODE_LENGTH = 6
 const ROUND_TRANSITION_DELAY_MS = 2000
 const COUNTDOWN_DURATION_MS = 3000
+const MAX_NAME_LENGTH = 32
+
+const sanitizeDisplayName = (raw: string | null | undefined): string => {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) {
+    return 'Player'
+  }
+  const normalized = trimmed.replace(/\s+/g, ' ')
+  return normalized.length > MAX_NAME_LENGTH
+    ? normalized.slice(0, MAX_NAME_LENGTH).trimEnd()
+    : normalized
+}
 
 const generateLobbyCode = (): string => {
   const digits = Math.floor(Math.random() * 10 ** CODE_LENGTH)
@@ -53,6 +65,7 @@ type PlayerSlot = {
   ready: boolean
   playing: boolean
   finished: boolean
+  name: string | null
   calibration: QuaternionTuple | null
   targetOrientation: QuaternionTuple | null
   rawOrientation: DeviceEuler | null
@@ -76,6 +89,7 @@ class Session {
     ready: false,
     playing: false,
     finished: false,
+    name: null,
     calibration: null,
     targetOrientation: null,
     rawOrientation: null,
@@ -194,6 +208,7 @@ class Session {
       slot.ready = false
       slot.playing = false
       slot.finished = false
+  slot.name = null
       slot.calibration = null
       slot.targetOrientation = null
       slot.rawOrientation = null
@@ -219,7 +234,7 @@ class Session {
         this.handleCreateLobby(client, message.timerSeconds, message.totalRounds)
         break
       case 'join-lobby':
-        this.handleJoinLobby(client, message.code)
+        this.handleJoinLobby(client, message.code, message.name)
         break
       case 'start-game':
         this.handleStartGame(client)
@@ -279,7 +294,7 @@ class Session {
     this.broadcastState()
   }
 
-  private handleJoinLobby(client: ClientRecord, code: string) {
+  private handleJoinLobby(client: ClientRecord, code: string, name: string) {
     if (client.device !== 'mobile') {
       return
     }
@@ -290,7 +305,7 @@ class Session {
       return
     }
 
-    const assigned = this.assignPlayerSlot(client)
+    const assigned = this.assignPlayerSlot(client, name)
     if (assigned) {
       this.broadcastState()
     }
@@ -312,7 +327,7 @@ class Session {
     this.startNextRound()
   }
 
-  private assignPlayerSlot(client: ClientRecord): boolean {
+  private assignPlayerSlot(client: ClientRecord, name: string): boolean {
     const available = this.players.find((slot) => slot.clientId === null)
     if (!available) {
       return false
@@ -322,9 +337,10 @@ class Session {
     available.ready = false
     available.playing = false
     available.finished = false
-  available.calibration = null
-  available.targetOrientation = null
-  available.rawOrientation = null
+    available.name = sanitizeDisplayName(name)
+    available.calibration = null
+    available.targetOrientation = null
+    available.rawOrientation = null
     available.orientation = [...IDENTITY_QUATERNION]
     available.angle = Math.PI
     available.progress = 0
@@ -341,9 +357,10 @@ class Session {
     slot.ready = false
     slot.playing = false
     slot.finished = false
+    slot.name = null
     slot.calibration = null
-  slot.targetOrientation = null
-  slot.rawOrientation = null
+    slot.targetOrientation = null
+    slot.rawOrientation = null
     slot.orientation = [...IDENTITY_QUATERNION]
     slot.angle = Math.PI
     slot.progress = 0
@@ -645,6 +662,7 @@ class Session {
         ready: slot.ready,
         playing: slot.playing,
         finished: slot.finished,
+        name: slot.name,
         angle: slot.angle,
         progress: slot.progress,
         orientation: [...slot.orientation] as QuaternionTuple,

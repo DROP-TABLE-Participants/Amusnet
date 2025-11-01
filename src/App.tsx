@@ -11,6 +11,8 @@ import { SHAPE_LABELS } from './shared/shapes'
 import type { LobbyStatus, RoundStatus } from './shared/messages'
 import { eulerFromDeviceOrientation, toTuple } from './utils/quaternion'
 
+const NAME_STORAGE_KEY = 'shadow-play.displayName'
+
 function App() {
   return (
     <SessionBootstrap>
@@ -214,25 +216,56 @@ function JoinScreen() {
   const leaveSlot = useSessionStore((state) => state.leaveSlot)
   const device = useSessionStore((state) => state.device)
   const [codeInput, setCodeInput] = useState('')
+  const [nameInput, setNameInput] = useState(() => {
+    if (typeof window === 'undefined') {
+      return ''
+    }
+    return window.localStorage.getItem(NAME_STORAGE_KEY) ?? ''
+  })
+  const [validationError, setValidationError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [searchParams] = useSearchParams()
   const lastAutoCodeRef = useRef<string | null>(null)
+  const nameInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const paramCode = searchParams.get('code')
-    if (paramCode && paramCode !== lastAutoCodeRef.current) {
-      lastAutoCodeRef.current = paramCode
-      setCodeInput(paramCode)
-      joinLobby(paramCode)
+    if (!paramCode) {
+      return
     }
-  }, [joinLobby, searchParams])
+    const sanitized = paramCode.replace(/[^0-9]/g, '').slice(0, 6)
+    if (!sanitized || sanitized === lastAutoCodeRef.current) {
+      return
+    }
+    lastAutoCodeRef.current = sanitized
+    setCodeInput(sanitized)
+    const trimmedName = nameInput.trim()
+    if (trimmedName) {
+      joinLobby(sanitized, trimmedName)
+    } else {
+      setValidationError('Enter a display name to join.')
+      nameInputRef.current?.focus()
+    }
+  }, [joinLobby, nameInput, searchParams])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!codeInput.trim()) {
+    const safeCode = codeInput.replace(/[^0-9]/g, '').slice(0, 6)
+    const safeName = nameInput.trim()
+    if (safeCode.length !== 6) {
+      setValidationError('Enter the 6 digit lobby code.')
       return
     }
-    joinLobby(codeInput.trim())
+    if (!safeName) {
+      setValidationError('Enter a display name to join.')
+      nameInputRef.current?.focus()
+      return
+    }
+    setValidationError(null)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(NAME_STORAGE_KEY, safeName)
+    }
+    joinLobby(safeCode, safeName)
   }
 
   const handleScan = useCallback(
@@ -245,10 +278,21 @@ function JoinScreen() {
         return
       }
       setCodeInput(extracted)
-      joinLobby(extracted)
+      const safeName = nameInput.trim()
+      if (!safeName) {
+        setValidationError('Enter a display name to join.')
+        setScanning(false)
+        nameInputRef.current?.focus()
+        return
+      }
+      setValidationError(null)
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(NAME_STORAGE_KEY, safeName)
+      }
+      joinLobby(extracted, safeName)
       setScanning(false)
     },
-    [joinLobby],
+    [joinLobby, nameInput],
   )
 
   const handleScanError = useCallback(() => {
@@ -286,9 +330,28 @@ function JoinScreen() {
                 inputMode="numeric"
                 maxLength={6}
                 value={codeInput}
-                onChange={(event) => setCodeInput(event.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(event) => {
+                  setCodeInput(event.target.value.replace(/[^0-9]/g, ''))
+                  setValidationError(null)
+                }}
               />
             </label>
+            <label className="input-group">
+              <span>Display name</span>
+              <input
+                ref={nameInputRef}
+                type="text"
+                maxLength={32}
+                value={nameInput}
+                placeholder="Pick a nickname"
+                autoComplete="name"
+                onChange={(event) => {
+                  setNameInput(event.target.value)
+                  setValidationError(null)
+                }}
+              />
+            </label>
+            {validationError ? <p className="join-error">{validationError}</p> : null}
             <div className="join-actions">
               <button type="submit" className="hud-button accent">
                 Join lobby

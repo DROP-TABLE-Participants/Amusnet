@@ -16,6 +16,7 @@ export type PlayerSnapshot = {
   ready: boolean
   playing: boolean
   finished: boolean
+  name: string | null
   angle: number
   progress: number
   orientation: QuaternionTuple
@@ -64,7 +65,7 @@ export type ServerMessage = {
 export type ClientMessage =
   | { type: 'register'; device: 'mobile' | 'desktop' }
   | { type: 'create-lobby'; timerSeconds: number; totalRounds: number }
-  | { type: 'join-lobby'; code: string }
+  | { type: 'join-lobby'; code: string; name: string }
   | { type: 'start-game' }
   | { type: 'leave-slot' }
   | {

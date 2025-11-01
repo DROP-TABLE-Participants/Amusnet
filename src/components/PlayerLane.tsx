@@ -120,6 +120,10 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
   const countdownSeconds = roundStatus === 'countdown' ? Math.max(0, Math.ceil(countdownMs / 1000)) : null
   const isWinner = roundStatus === 'complete' && winnerSlot === player.slot
   const laneTargetOrientation = player.targetOrientation ?? targetOrientation
+  const laneLabel = `Lane ${displayIndex + 1}`
+  const nameLabel = player.connected
+    ? (player.name && player.name.trim() ? player.name : 'Player')
+    : 'Open slot'
 
   let statusLabel = 'Open'
   if (player.connected) {
@@ -141,7 +145,7 @@ export function PlayerLane({ player, displayIndex, roundStatus, shapeId, targetO
   return (
     <div className={`lane ${player.connected ? 'lane-connected' : 'lane-open'} ${isSelf ? 'lane-self' : ''} ${isWinner ? 'lane-winner' : ''}`}>
       <div className="lane-header">
-        <span className="lane-slot">Player {displayIndex + 1}</span>
+        <span className="lane-slot">{`${laneLabel}: ${nameLabel}`}</span>
         <span className={`lane-status ${player.connected ? 'lane-status-active' : ''}`}>{statusLabel}</span>
       </div>
       <div className="lane-canvas" aria-hidden>

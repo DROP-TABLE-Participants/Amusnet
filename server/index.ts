@@ -8,6 +8,7 @@ import {
   IDENTITY_QUATERNION,
   clampProgress,
   randomDeviceOrientationQuaternion,
+  shadowAngleBetween,
   toQuaternion,
   toTuple,
   type QuaternionTuple,
@@ -601,8 +602,8 @@ class Session {
     slot.targetOrientation = targetForSlot ? toTuple(targetForSlot) : null
 
     if (this.round.status === 'active' && this.targetQuaternion) {
-      const comparisonTarget = targetForSlot ?? this.targetQuaternion
-      const angle = relativeOrientation.angleTo(comparisonTarget)
+      const comparisonTarget = targetForSlot ?? new Quaternion(...IDENTITY_QUATERNION)
+      const angle = shadowAngleBetween(relativeOrientation, comparisonTarget)
       slot.angle = angle
 
       if (!slot.finished && angle < MATCH_THRESHOLD) {
@@ -614,7 +615,7 @@ class Session {
       }
     } else {
       const baselineTarget = targetForSlot ?? new Quaternion(...IDENTITY_QUATERNION)
-      slot.angle = relativeOrientation.angleTo(baselineTarget)
+      slot.angle = shadowAngleBetween(relativeOrientation, baselineTarget)
       if (!slot.finished) {
         slot.progress = 0
       }

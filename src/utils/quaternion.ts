@@ -44,6 +44,36 @@ export function clampProgress(angleRadians: number): number {
   return Number(buffered.toFixed(3))
 }
 
+const FORWARD_VECTOR = new Vector3(0, 0, -1)
+const UP_VECTOR = new Vector3(0, 1, 0)
+
+function wrapToPi(value: number): number {
+  const wrapped = Math.atan2(Math.sin(value), Math.cos(value))
+  return wrapped
+}
+
+function toShadowOrientationAngles(quaternion: Quaternion): { pitch: number; yaw: number } {
+  const forward = FORWARD_VECTOR.clone().applyQuaternion(quaternion)
+  const clampedY = Math.max(-1, Math.min(1, forward.y))
+  const pitch = Math.asin(clampedY)
+  const yaw = Math.atan2(forward.x, -forward.z)
+  return { pitch, yaw }
+}
+
+export function shadowAngleBetween(a: Quaternion, b: Quaternion): number {
+  const aAngles = toShadowOrientationAngles(a)
+  const bAngles = toShadowOrientationAngles(b)
+  const pitchDelta = wrapToPi(aAngles.pitch - bAngles.pitch)
+  const yawDelta = wrapToPi(aAngles.yaw - bAngles.yaw)
+
+  const upA = UP_VECTOR.clone().applyQuaternion(a)
+  const upB = UP_VECTOR.clone().applyQuaternion(b)
+  const upYaw = wrapToPi(Math.atan2(upA.x, upA.y) - Math.atan2(upB.x, upB.y))
+
+  const combined = Math.sqrt(pitchDelta * pitchDelta + yawDelta * yawDelta + upYaw * upYaw * 0.5)
+  return combined
+}
+
 export function eulerFromDeviceOrientation(
   alpha: number,
   beta: number,
@@ -53,9 +83,9 @@ export function eulerFromDeviceOrientation(
   const radBeta = degToRad(beta)
   const radGamma = degToRad(gamma)
 
-  const euler = new Euler(0, 0, 0, 'XZY')
-  euler.x = radAlpha
-  euler.z = -radBeta
+  const euler = new Euler(0, 0, 0, 'ZXY')
+  euler.z = radAlpha
+  euler.x = radBeta
   euler.y = radGamma
 
   console.log(

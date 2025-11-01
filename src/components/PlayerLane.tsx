@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { Center, ContactShadows, Environment } from '@react-three/drei'
-import type { Group } from 'three'
+import { Center, Environment } from '@react-three/drei'
+import { Quaternion, Vector3, type Group } from 'three'
 import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
 import { toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
 import { getShapeDefinition } from '../shapes/catalog'
 
-const cameraSidePosition: [number, number, number] = [5.4, 2.2, 0.3]
-const SHAPE_PIVOT_HEIGHT = 0.95
+const cameraFrontPosition: [number, number, number] = [0, 0, 5]
+const CAMERA_LOOK_AT: [number, number, number] = [0, 0, 0]
+const WALL_POSITION: [number, number, number] = [0, 0, -2]
+const WALL_TARGET = new Vector3(...WALL_POSITION)
+const BASE_ROTATION = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2)
 
 type LaneSceneProps = {
   orientation: QuaternionTuple
@@ -25,22 +28,31 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
     () => (targetOrientation ? toQuaternion(targetOrientation) : null),
     [targetOrientation],
   )
-  const { camera } = useThree()
+  const camera = useThree((state) => state.camera)
+  const wallViewport = useThree((state) =>
+    state.viewport.getCurrentViewport(state.camera, WALL_TARGET),
+  )
+  const wallScale = useMemo<[number, number]>(
+    () => [wallViewport.width * 1.05, wallViewport.height * 1.05],
+    [wallViewport.width, wallViewport.height],
+  )
 
   useEffect(() => {
-    camera.position.set(...cameraSidePosition)
-    camera.lookAt(0, 0.85, 0)
+    camera.position.set(...cameraFrontPosition)
+    camera.lookAt(...CAMERA_LOOK_AT)
   }, [camera])
 
   useEffect(() => {
     if (playerRef.current) {
-      playerRef.current.quaternion.copy(orientationQuat)
+      const adjusted = orientationQuat.clone().multiply(BASE_ROTATION)
+      playerRef.current.quaternion.copy(adjusted)
     }
   }, [orientationQuat])
 
   useEffect(() => {
     if (ghostRef.current && targetQuat) {
-      ghostRef.current.quaternion.copy(targetQuat)
+      const adjusted = targetQuat.clone().multiply(BASE_ROTATION)
+      ghostRef.current.quaternion.copy(adjusted)
     }
   }, [targetQuat])
 
@@ -49,43 +61,43 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
   return (
     <>
       <color attach="background" args={['#0a0f24']} />
-      <ambientLight intensity={0.58} />
+      <ambientLight intensity={0.26} />
       <directionalLight
-        position={[6.5, 5.4, 2.2]}
-        intensity={1.4}
+        position={[0, 0, 9.4]}
+        intensity={1.8}
         castShadow
         shadow-mapSize={[1536, 1536]}
+        shadow-camera-near={0.5}
+        shadow-camera-far={20}
+        shadow-camera-left={-8}
+        shadow-camera-right={8}
+        shadow-camera-top={8}
+        shadow-camera-bottom={-8}
+        shadow-bias={-0.0002}
       />
-      <spotLight
-        position={[-5.5, 3.4, -1.2]}
-        angle={0.48}
-        intensity={1.1}
-        penumbra={0.4}
-        castShadow
-      />
-      <group ref={ghostRef} position={[0, SHAPE_PIVOT_HEIGHT, 0]} visible={Boolean(targetQuat)}>
+      <spotLight position={[0, 0, 9.8]} angle={0.4} intensity={0.35} penumbra={0.45} castShadow={false} />
+      <group ref={ghostRef} position={[0, 0, 0]} visible={Boolean(targetQuat)}>
         {targetQuat ? (
           <Center>
-            <Component variant="ghost" />
+            <Component variant="shadow" />
           </Center>
         ) : null}
       </group>
-      <group ref={playerRef} position={[0, SHAPE_PIVOT_HEIGHT, 0]}>
+      <group ref={playerRef} position={[0, 0, 0]}>
         <Center>
           <Component variant="default" />
         </Center>
       </group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[9, 6]} />
-        <meshStandardMaterial color="#161d3a" roughness={0.8} metalness={0.05} />
+      <mesh
+        position={WALL_POSITION}
+        rotation={[0, 0, 0]}
+        scale={[wallScale[0], wallScale[1], 1]}
+        receiveShadow
+        castShadow={false}
+      >
+        <planeGeometry args={[1, 1]} />
+        <meshStandardMaterial color="#10183a" roughness={1} metalness={0} />
       </mesh>
-      <ContactShadows
-        position={[0, -0.04, 0]}
-        opacity={0.68}
-        blur={2.1}
-        scale={6.6}
-        color="#010208"
-      />
       <Environment preset="sunset" />
     </>
   )

@@ -4,7 +4,7 @@ import '@react-three/fiber'
 import { Color, ExtrudeGeometry, Shape } from 'three'
 import type { ShapeId } from '../shared/shapes'
 
-export type ShapeVariant = 'default' | 'silhouette' | 'ghost'
+export type ShapeVariant = 'default' | 'silhouette' | 'ghost' | 'shadow'
 
 export type ShapeComponentProps = {
   variant?: ShapeVariant
@@ -20,17 +20,20 @@ const materialPalette = {
   default: new Color('#6ec1ff'),
   silhouette: new Color('#060606'),
   ghost: new Color('#3dd9ff'),
+  shadow: new Color('#000000'),
 }
 
 function useVariantMaterial(variant: ShapeVariant | undefined) {
   const key = variant ?? 'default'
   const color = materialPalette[key]
-  const transparent = key === 'ghost'
-  const opacity = key === 'ghost' ? 0.35 : 1
-  const roughness = key === 'silhouette' ? 1 : 0.35
-  const metalness = key === 'silhouette' ? 0 : 0.2
+  const transparent = key === 'ghost' || key === 'default' || key === 'shadow'
+  const opacity = key === 'ghost' ? 0.25 : key === 'default' ? 0.1 : key === 'shadow' ? 0 : 1
+  const roughness = key === 'silhouette' || key === 'shadow' ? 1 : 0.35
+  const metalness = key === 'silhouette' || key === 'shadow' ? 0 : 0.2
+  const depthWrite = key === 'default' ? false : key !== 'shadow'
+  const colorWrite = key !== 'shadow'
 
-  return { color, transparent, opacity, roughness, metalness }
+  return { color, transparent, opacity, roughness, metalness, depthWrite, colorWrite }
 }
 
 export const CatShape = memo(({ variant }: ShapeComponentProps) => {

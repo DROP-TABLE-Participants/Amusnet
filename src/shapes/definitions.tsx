@@ -1,9 +1,26 @@
 import { memo, useMemo } from 'react'
-import type { ReactNode } from 'react'
+import type { ComponentType } from 'react'
 import '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
-import { Box3, Color, ExtrudeGeometry, Mesh, MeshStandardMaterial, Shape, Vector3 } from 'three'
+import {
+  Box3,
+  BoxGeometry,
+  Color,
+  ConeGeometry,
+  CylinderGeometry,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three'
 import type { ShapeId } from '../shared/shapes'
+import {
+  GENERATED_SHAPES,
+  type GeneratedPrimitive,
+  type GeneratedShapeDefinition,
+} from '../generated/shapes'
 
 export type ShapeVariant = 'default' | 'silhouette' | 'ghost' | 'shadow'
 
@@ -14,7 +31,7 @@ export type ShapeComponentProps = {
 export type ShapeDefinition = {
   id: ShapeId
   label: string
-  Component: (props: ShapeComponentProps) => ReactNode
+  Component: ComponentType<ShapeComponentProps>
 }
 
 const materialPalette = {
@@ -37,121 +54,20 @@ function getVariantMaterial(variant: ShapeVariant | undefined) {
   return { color, transparent, opacity, roughness, metalness, depthWrite, colorWrite }
 }
 
-export const CatShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = getVariantMaterial(variant)
-
-  return (
-    <group>
-      <mesh castShadow position={[0, 0.45, 0]}>
-        <sphereGeometry args={[0.75, 48, 48]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0.75, 1.1, 0]}>
-        <sphereGeometry args={[0.45, 48, 48]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0.3, 1.45, 0.28]} rotation={[0, 0, Math.PI / 6]}>
-        <coneGeometry args={[0.18, 0.32, 16]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0.3, 1.45, -0.28]} rotation={[0, 0, -Math.PI / 6]}>
-        <coneGeometry args={[0.18, 0.32, 16]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh
-        castShadow
-        position={[-0.85, 0.55, -0.1]}
-        rotation={[Math.PI / 6, 0, Math.PI / 3]}
-      >
-        <cylinderGeometry args={[0.08, 0.08, 1.1, 12]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[1.18, 0.9, 0.28]}>
-        <sphereGeometry args={[0.12, 24, 24]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[1.18, 0.9, -0.28]}>
-        <sphereGeometry args={[0.12, 24, 24]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-    </group>
-  )
+const GENERATED_SHAPE_DEFINITIONS: ShapeDefinition[] = GENERATED_SHAPES.map((shape) => {
+  const Component = memo(({ variant }: ShapeComponentProps) => {
+    const object = useMemo(() => buildGeneratedObject(shape, variant), [shape, variant])
+    return <primitive object={object} />
+  })
+  Component.displayName = `${shape.id}-shape`
+  return {
+    id: shape.id,
+    label: shape.label,
+    Component,
+  }
 })
-CatShape.displayName = 'CatShape'
 
-export const StarShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = getVariantMaterial(variant)
-
-  const geometry = useMemo(() => {
-    const spikes = 5
-    const outerRadius = 1.1
-    const innerRadius = 0.48
-
-    const shape = new Shape()
-    shape.moveTo(0, outerRadius)
-    for (let i = 0; i < spikes * 2; i += 1) {
-      const angle = (Math.PI * i) / spikes
-      const radius = i % 2 === 0 ? outerRadius : innerRadius
-      shape.lineTo(Math.sin(angle) * radius, Math.cos(angle) * radius)
-    }
-    shape.closePath()
-
-    return new ExtrudeGeometry(shape, {
-      depth: 0.5,
-      bevelEnabled: true,
-      bevelThickness: 0.12,
-      bevelSize: 0.12,
-      bevelSegments: 4,
-    })
-  }, [])
-
-  geometry.center()
-
-  return (
-    <group rotation={[Math.PI / 2, 0, 0]}>
-      <mesh castShadow geometry={geometry}>
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-    </group>
-  )
-})
-StarShape.displayName = 'StarShape'
-
-export const AirplaneShape = memo(({ variant }: ShapeComponentProps) => {
-  const materialProps = getVariantMaterial(variant)
-
-  return (
-    <group>
-      <mesh castShadow position={[0, 0.2, 0]} scale={[1.3, 0.25, 0.25]}>
-        <boxGeometry args={[2, 0.8, 0.6]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0, 0.35, -0.05]}>
-        <coneGeometry args={[0.38, 0.6, 32]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0, 0.45, 0]}
-        scale={[1.8, 0.1, 0.8]}
-      >
-        <boxGeometry args={[1.4, 0.32, 1.8]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0, 0.55, -0.55]} scale={[0.5, 0.05, 1.4]}>
-        <boxGeometry args={[1, 0.25, 1.2]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0, 0.55, 0.55]} scale={[0.5, 0.05, 1.4]} rotation={[0, 0, 0]}>
-        <boxGeometry args={[1, 0.25, 1.2]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-      <mesh castShadow position={[0, 0.05, -1.0]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.08, 0.12, 0.9, 20]} />
-        <meshStandardMaterial {...materialProps} />
-      </mesh>
-    </group>
-  )
-})
-AirplaneShape.displayName = 'AirplaneShape'
+export const generatedShapeDefinitions = GENERATED_SHAPE_DEFINITIONS
 
 export const FinaleShape = memo(({ variant }: ShapeComponentProps) => {
   const { scene } = useGLTF(FINALE_MODEL_URL)
@@ -205,3 +121,118 @@ FinaleShape.displayName = 'FinaleShape'
 const FINALE_MODEL_URL = new URL('./five_shape.glb', import.meta.url).href
 
 useGLTF.preload(FINALE_MODEL_URL)
+
+function buildGeneratedObject(shape: GeneratedShapeDefinition, variant: ShapeVariant | undefined) {
+  const materialProps = getVariantMaterial(variant)
+  const group = new Group()
+
+  shape.primitives.forEach((primitive, index) => {
+  const mesh = createPrimitiveMesh(primitive, materialProps, variant !== 'shadow')
+    if (mesh) {
+      mesh.name = `${shape.id}-part-${index}`
+      group.add(mesh)
+    }
+  })
+
+  if (group.children.length === 0) {
+    const fallback = new Mesh(new SphereGeometry(0.5, 24, 24), new MeshStandardMaterial(materialProps))
+    fallback.castShadow = true
+    fallback.receiveShadow = variant !== 'shadow'
+    group.add(fallback)
+  }
+
+  normalizeGroupTransform(group)
+  return group
+}
+
+function createPrimitiveMesh(
+  primitive: GeneratedPrimitive,
+  materialProps: ReturnType<typeof getVariantMaterial>,
+  receiveShadow: boolean,
+): Mesh | null {
+  const material = new MeshStandardMaterial(materialProps)
+  let geometry:
+    | SphereGeometry
+    | BoxGeometry
+    | ConeGeometry
+    | CylinderGeometry
+    | TorusGeometry
+    | null = null
+
+  switch (primitive.kind) {
+    case 'sphere':
+      geometry = new SphereGeometry(...(primitive.args ?? [0.6, 32, 32]))
+      break
+    case 'box':
+      geometry = new BoxGeometry(...(primitive.args ?? [1, 1, 1]))
+      break
+    case 'cone':
+      geometry = new ConeGeometry(...(primitive.args ?? [0.6, 1.4, 24]))
+      break
+    case 'cylinder':
+      geometry = new CylinderGeometry(...(primitive.args ?? [0.5, 0.5, 1.6, 24]))
+      break
+    case 'torus':
+      geometry = new TorusGeometry(...(primitive.args ?? [0.8, 0.18, 24, 36]))
+      break
+    default:
+      geometry = null
+      break
+  }
+
+  if (!geometry) {
+    return null
+  }
+
+  const mesh = new Mesh(geometry, material)
+  applyVector(mesh.position, primitive.position ?? [0, 0, 0])
+  applyRotation(mesh, primitive.rotation)
+  applyScale(mesh, primitive.scale)
+  mesh.castShadow = true
+  mesh.receiveShadow = receiveShadow
+  return mesh
+}
+
+function normalizeGroupTransform(group: Group) {
+  const bounds = new Box3().setFromObject(group)
+  const size = new Vector3()
+  bounds.getSize(size)
+  const maxDimension = Math.max(size.x, size.y, size.z)
+
+  const targetSize = 2.2
+  if (maxDimension > 0) {
+    const scale = targetSize / maxDimension
+    group.scale.setScalar(scale)
+
+    const center = new Vector3()
+    bounds.getCenter(center)
+    group.position.set(-center.x * scale, -center.y * scale, -center.z * scale)
+  } else {
+    group.position.set(0, 0, 0)
+  }
+}
+
+function applyVector(target: Vector3, values: [number, number, number]) {
+  target.set(values[0], values[1], values[2])
+}
+
+function applyRotation(mesh: Mesh, rotation?: [number, number, number]) {
+  if (!rotation) {
+    mesh.rotation.set(0, 0, 0)
+    return
+  }
+  const radians = rotation.map((value) => (value * Math.PI) / 180)
+  mesh.rotation.set(radians[0], radians[1], radians[2])
+}
+
+function applyScale(mesh: Mesh, scale?: number | [number, number, number]) {
+  if (scale == null) {
+    mesh.scale.set(1, 1, 1)
+    return
+  }
+  if (typeof scale === 'number') {
+    mesh.scale.setScalar(scale)
+    return
+  }
+  mesh.scale.set(scale[0], scale[1], scale[2])
+}

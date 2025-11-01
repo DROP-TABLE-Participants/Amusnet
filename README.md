@@ -43,5 +43,16 @@ npm run lint     # ESLint with TypeScript support
 - `@react-three/fiber`, `@react-three/drei`, `three` for rendering
 - WebSocket backend (`ws`, `tsx`, `nanoid`) handling session state and gyro updates
 - Zustand client store mirroring server payloads
+- Optional generative shape pipeline powered by the OpenAI Responses API
 
 All assets are procedural geometries, so loads stay light and every new round feels instant.
+
+## Autogenerating Shape Silhouettes with ChatGPT
+
+You can refresh the three racing silhouettes at any time via the `generate:shapes` script. Provide your OpenAI API key (and optionally a custom `OPENAI_MODEL`) through the environment, then run:
+
+```bash
+OPENAI_API_KEY=sk-... npm run generate:shapes
+```
+
+The script asks ChatGPT to design three distinct silhouettes using basic primitives and writes the results to `src/generated/shapes.ts`. Restart the dev server (or let Vite reload) to see the new lane geometry. Keep your key out of version control—store it in a personal `.env` file that you do not commit.

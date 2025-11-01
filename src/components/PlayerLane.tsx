@@ -6,7 +6,7 @@ import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
 import { toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
-import { FINAL_SHAPE_ID } from '../shared/shapes'
+import { DEFAULT_SHAPE_ID, FINAL_SHAPE_ID } from '../shared/shapes'
 import { getShapeDefinition } from '../shapes/catalog'
 
 const cameraFrontPosition: [number, number, number] = [0, 0, 5]
@@ -57,7 +57,7 @@ function LaneScene({ orientation, targetOrientation, shapeId }: LaneSceneProps) 
     }
   }, [targetQuat])
 
-  const { Component } = getShapeDefinition(shapeId ?? 'cat')
+  const { Component } = getShapeDefinition(shapeId ?? DEFAULT_SHAPE_ID)
 
   return (
     <>

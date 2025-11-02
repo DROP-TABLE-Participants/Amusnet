@@ -18,6 +18,7 @@ import slotTick from './assets/slot-tick.mp3'
 import roundWon from './assets/round-won.mp3'
 import joinLobbyChime from './assets/join-lobby.mp3'
 import leaveLobbyChime from './assets/leave-lobby.mp3'
+import roundLoop from './assets/loop.mp3'
 
 const NAME_STORAGE_KEY = 'shadow-play.displayName'
 
@@ -173,6 +174,20 @@ function HostDashboard() {
   }, [signalCopyFeedback])
 
   useEffect(() => {
+    const audio = loopAudioRef.current
+    if (!audio) {
+      return
+    }
+    audio.volume = 0
+    audio.playbackRate = 1
+    audio.loop = true
+
+    return () => {
+      audio.pause()
+    }
+  }, [])
+
+  useEffect(() => {
     loopContextRef.current = {
       roundStatus: sessionState.round.status,
       lobbyStatus: sessionState.lobby.status,
@@ -298,6 +313,16 @@ function HostDashboard() {
   const timerWidth = timerRatio != null ? `${(timerRatio * 100).toFixed(1)}%` : '0%'
   const showTimerBar = timerRatio != null
   const showCountdownOverlay = showGameView && roundStatus === 'countdown'
+  const loopAudioElement = (
+    <audio
+      ref={loopAudioRef}
+      src={roundLoop}
+      preload="auto"
+      loop
+      playsInline
+      aria-hidden="true"
+    />
+  )
 
   useEffect(() => {
     const audio = loopAudioRef.current
@@ -318,6 +343,10 @@ function HostDashboard() {
 
     if (roundStatus === 'active') {
       ensureLoopPlaying()
+      if (sessionState.round.winnerSlot != null) {
+        scheduleLoopTarget(0.12, 0.94)
+        return
+      }
       const cutoff = 15000
       const remaining = sessionState.round.remainingMs
       const intensity = remaining <= cutoff ? Math.max(0, Math.min(1, (cutoff - remaining) / cutoff)) : 0
@@ -330,7 +359,7 @@ function HostDashboard() {
 
     if (roundStatus === 'complete') {
       const hasWinner = sessionState.round.winnerSlot != null
-      scheduleLoopTarget(hasWinner ? 0.12 : 0.08, 0.95)
+      scheduleLoopTarget(0, hasWinner ? 0.94 : 0.9)
       return
     }
 
@@ -424,47 +453,50 @@ function HostDashboard() {
 
   if (showSetup) {
     return (
-      <div className="page host-setup">
-        <img src="../src/assets/bg.png" alt="bg" className="host-bg" />
-        <div className="host-card">
-          <h1>Configure your Lobby</h1>
-          <p className="host-subtitle">Configure your race and share the code with your players.</p>
-          <form className="host-form" onSubmit={handleCreateLobby}>
-            <label className="input-group range">
-              <span>Round timer</span>
-              <div className="range-row">
-                <input
-                  type="range"
-                  min={30}
-                  max={300}
-                  step={10}
-                  value={timerInput}
-                  onChange={(event) => setTimerInput(Number(event.target.value))}
-                  aria-valuetext={`${timerInput} seconds`}
-                />
-                <span className="range-value">{timerInput}s</span>
-              </div>
-            </label>
-            <label className="input-group range">
-              <span>Number of rounds</span>
-              <div className="range-row">
-                <input
-                  type="range"
-                  min={3}
-                  max={10}
-                  step={1}
-                  value={roundsInput}
-                  onChange={(event) => setRoundsInput(Number(event.target.value))}
-                />
-                <span className="range-value">{roundsInput}</span>
-              </div>
-            </label>
-            <button type="submit" className="hud-button accent host-submit">
-              Create lobby
-            </button>
-          </form>
+      <>
+        {loopAudioElement}
+        <div className="page host-setup">
+          <img src="../src/assets/bg.png" alt="bg" className="host-bg" />
+          <div className="host-card">
+            <h1>Configure your Lobby</h1>
+            <p className="host-subtitle">Configure your race and share the code with your players.</p>
+            <form className="host-form" onSubmit={handleCreateLobby}>
+              <label className="input-group range">
+                <span>Round timer</span>
+                <div className="range-row">
+                  <input
+                    type="range"
+                    min={30}
+                    max={300}
+                    step={10}
+                    value={timerInput}
+                    onChange={(event) => setTimerInput(Number(event.target.value))}
+                    aria-valuetext={`${timerInput} seconds`}
+                  />
+                  <span className="range-value">{timerInput}s</span>
+                </div>
+              </label>
+              <label className="input-group range">
+                <span>Number of rounds</span>
+                <div className="range-row">
+                  <input
+                    type="range"
+                    min={3}
+                    max={10}
+                    step={1}
+                    value={roundsInput}
+                    onChange={(event) => setRoundsInput(Number(event.target.value))}
+                  />
+                  <span className="range-value">{roundsInput}</span>
+                </div>
+              </label>
+              <button type="submit" className="hud-button accent host-submit">
+                Create lobby
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      </>
     )
   }
 
@@ -484,8 +516,10 @@ function HostDashboard() {
   }
 
   return (
-    <div className="page">
-      <header className="hud">
+    <>
+      {loopAudioElement}
+      <div className="page">
+        <header className="hud">
         <div className="hud-left">
           <span className={`status-pill status-${roundStatus}`}>{statusLabel}</span>
           <span className="divider" />
@@ -618,14 +652,15 @@ function HostDashboard() {
         </main>
       ) : null}
 
-      {showResults ? (
-        <section className="results-section">
-          <ResultsDashboard
-            players={sessionState.players}
-          />
-        </section>
-      ) : null}
-    </div>
+        {showResults ? (
+          <section className="results-section">
+            <ResultsDashboard
+              players={sessionState.players}
+            />
+          </section>
+        ) : null}
+      </div>
+    </>
   )
 }
 

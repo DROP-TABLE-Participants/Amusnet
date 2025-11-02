@@ -32,6 +32,7 @@ const CONFETTI_PIECES: ConfettiPiece[] = Array.from({ length: 36 }, (_, index) =
 export type ResultsDashboardProps = {
   players: PlayerSnapshot[]
   compact?: boolean
+  finalMultiplier?: number
 }
 
 export const ResultsDashboard = memo(({ players, compact = false }: ResultsDashboardProps) => {

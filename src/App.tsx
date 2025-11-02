@@ -19,6 +19,7 @@ import roundWon from './assets/round-won.mp3'
 import joinLobbyChime from './assets/join-lobby.mp3'
 import leaveLobbyChime from './assets/leave-lobby.mp3'
 import roundLoop from './assets/loop.mp3'
+import hostBg from './assets/bg.png'
 
 const NAME_STORAGE_KEY = 'shadow-play.displayName'
 
@@ -456,7 +457,7 @@ function HostDashboard() {
       <>
         {loopAudioElement}
         <div className="page host-setup">
-          <img src="../src/assets/bg.png" alt="bg" className="host-bg" />
+          <img src={hostBg} alt="bg" className="host-bg" />
           <div className="host-card">
             <h1>Configure your Lobby</h1>
             <p className="host-subtitle">Configure your race and share the code with your players.</p>

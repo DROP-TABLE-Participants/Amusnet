@@ -78,17 +78,35 @@ const isMobileDevice = (): DeviceType => {
     : 'desktop'
 }
 
+type ShadowPlayWindow = Window & { __SHADOW_PLAY_WS_URL?: string }
+
 const resolveSocketUrl = () => {
   if (typeof window === 'undefined') {
     return 'ws://localhost:8787'
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const host = window.location.hostname
-  const port = (import.meta.env.VITE_WS_PORT as string | undefined) ?? '8787'
+
+  const metaOverride = typeof document !== 'undefined'
+    ? document.querySelector('meta[name="shadow-play:ws-url"]')?.getAttribute('content')?.trim()
+    : null
+  if (metaOverride) {
+    return metaOverride
+  }
+
+  const globalOverride = (window as ShadowPlayWindow).__SHADOW_PLAY_WS_URL
+  if (globalOverride && globalOverride.trim().length > 0) {
+    return globalOverride.trim()
+  }
+
   if (import.meta.env.VITE_WS_URL) {
     return import.meta.env.VITE_WS_URL as string
   }
-  return `${protocol}://${host}:${port}`
+
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const host = window.location.hostname
+  const port = (import.meta.env.VITE_WS_PORT as string | undefined)
+    ?? (window.location.port ? window.location.port : '8787')
+
+  return port ? `${protocol}://${host}:${port}` : `${protocol}://${host}`
 }
 
 let socket: WebSocket | null = null

@@ -56,3 +56,24 @@ OPENAI_API_KEY=sk-... npm run generate:shapes
 ```
 
 The script asks ChatGPT to design three distinct silhouettes using basic primitives and writes the results to `src/generated/shapes.ts`. Restart the dev server (or let Vite reload) to see the new lane geometry. Keep your key out of version control—store it in a personal `.env` file that you do not commit.
+
+## Docker Images
+
+Two Dockerfiles are included for production deployments:
+
+- `Dockerfile.client` builds the static Vite bundle and serves it from Nginx.
+- `Dockerfile.server` packages the WebSocket backend using `npx tsx server/index.ts`.
+
+Example build commands:
+
+```bash
+docker build -t shadow-play-client -f Dockerfile.client .
+docker build -t shadow-play-server -f Dockerfile.server .
+```
+
+The client container exposes port `80`; the server container exposes port `8787`. Supply a custom WebSocket endpoint by either
+
+1. Setting `VITE_WS_URL` during the client build, or
+2. Injecting `<meta name="shadow-play:ws-url" content="ws://your-host:8787" />` at runtime (for example via your HTML template) or by defining `window.__SHADOW_PLAY_WS_URL` before the bundle executes.
+
+When running inside Docker no local TLS certificates are required—the dev HTTPS configuration now activates only when `WS_SSL_KEY`/`WS_SSL_CERT` point to readable files, so containers default to plain HTTP/WebSocket.

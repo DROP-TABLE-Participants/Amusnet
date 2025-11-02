@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.7-labs
+
+ARG NODE_VERSION=22-alpine
+
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION} AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+FROM --platform=$TARGETPLATFORM node:${NODE_VERSION}
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+EXPOSE 8787
+CMD ["npx", "tsx", "server/index.ts"]

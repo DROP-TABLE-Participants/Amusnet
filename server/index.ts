@@ -35,7 +35,10 @@ const MATCH_PROGRESS_END = 0.95
 const CODE_LENGTH = 6
 const ROUND_TRANSITION_DELAY_MS = 2000
 const COUNTDOWN_DURATION_MS = 3000
+const MATCH_SETTLE_DURATION_MS = 450
 const MAX_NAME_LENGTH = 32
+
+const FINAL_WORLD_TARGET: QuaternionTuple = [0.026595, -0.012845, 0.003788, 0.999449]//[0.006524, 0.027873, 0.019246, 0.999405]
 
 const LOG_PREFIX = '[shadow-play]'
 const DEBUG_ENABLED = process.env.DEBUG_SHADOW_PLAY !== '0'
@@ -95,6 +98,7 @@ type PlayerSlot = {
   targetOrientation: QuaternionTuple | null
   rawOrientation: DeviceEuler | null
   orientation: QuaternionTuple
+  absoluteOrientation: QuaternionTuple
   angle: number
   progress: number
   idleOrientation: QuaternionTuple
@@ -121,6 +125,7 @@ class Session {
     targetOrientation: null,
     rawOrientation: null,
     orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
+    absoluteOrientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
     angle: Math.PI,
     progress: 0,
     idleOrientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
@@ -147,6 +152,7 @@ class Session {
   private roundTicker: NodeJS.Timeout | null = null
   private roundTransition: NodeJS.Timeout | null = null
   private countdownTicker: NodeJS.Timeout | null = null
+  private matchSettleTimeout: NodeJS.Timeout | null = null
   private availableShapes: GeneratedShapeDefinition[] = Array.from(GENERATED_SHAPES)
   private roundShapeSequence: GeneratedShapeDefinition[] = Array.from(GENERATED_SHAPES)
   private shapeGenerationRequestId = 0
@@ -239,6 +245,10 @@ class Session {
       clearInterval(this.countdownTicker)
       this.countdownTicker = null
     }
+    if (this.matchSettleTimeout) {
+      clearTimeout(this.matchSettleTimeout)
+      this.matchSettleTimeout = null
+    }
     this.countdownEndTime = null
     this.roundEndTime = null
     log.debug('round timers cleared')
@@ -264,6 +274,7 @@ class Session {
       slot.targetOrientation = null
       slot.rawOrientation = null
       slot.orientation = [...IDENTITY_QUATERNION]
+      slot.absoluteOrientation = [...IDENTITY_QUATERNION]
       slot.angle = Math.PI
       slot.progress = 0
       slot.idleOrientation = [...IDENTITY_QUATERNION]
@@ -526,6 +537,7 @@ class Session {
       slot.targetOrientation = null
       slot.rawOrientation = null
       slot.orientation = [...IDENTITY_QUATERNION]
+      slot.absoluteOrientation = [...IDENTITY_QUATERNION]
       slot.angle = Math.PI
       slot.progress = 0
     })
@@ -612,6 +624,7 @@ class Session {
     available.targetOrientation = null
     available.rawOrientation = null
     available.orientation = [...IDENTITY_QUATERNION]
+    available.absoluteOrientation = [...IDENTITY_QUATERNION]
     available.angle = Math.PI
     available.progress = 0
     available.idleOrientation = [...IDENTITY_QUATERNION]
@@ -639,6 +652,7 @@ class Session {
     slot.targetOrientation = null
     slot.rawOrientation = null
     slot.orientation = [...IDENTITY_QUATERNION]
+    slot.absoluteOrientation = [...IDENTITY_QUATERNION]
     slot.angle = Math.PI
     slot.progress = 0
     slot.idleOrientation = [...IDENTITY_QUATERNION]
@@ -671,12 +685,14 @@ class Session {
     this.lobby.currentRound += 1
     this.refreshMatchThreshold()
 
-  const isFinalRound = this.lobby.currentRound === this.lobby.totalRounds
-  const scheduleIndex = this.lobby.currentRound - 1
-  const scheduledShape = !isFinalRound ? this.roundShapeSequence[scheduleIndex] : null
-  const fallbackShapeId = this.availableShapes[0]?.id ?? (GENERATED_SHAPES[0]?.id ?? FINAL_SHAPE_ID)
-  const shapeId = isFinalRound ? FINAL_SHAPE_ID : (scheduledShape?.id ?? fallbackShapeId)
-  const target = randomDeviceOrientationQuaternion()
+    const isFinalRound = this.lobby.currentRound === this.lobby.totalRounds
+    const scheduleIndex = this.lobby.currentRound - 1
+    const scheduledShape = !isFinalRound ? this.roundShapeSequence[scheduleIndex] : null
+    const fallbackShapeId = this.availableShapes[0]?.id ?? (GENERATED_SHAPES[0]?.id ?? FINAL_SHAPE_ID)
+    const shapeId = isFinalRound ? FINAL_SHAPE_ID : (scheduledShape?.id ?? fallbackShapeId)
+    const target = isFinalRound
+      ? toQuaternion(FINAL_WORLD_TARGET)
+      : randomDeviceOrientationQuaternion()
 
     log.info('starting next round', {
       round: this.lobby.currentRound,
@@ -700,7 +716,7 @@ class Session {
       const baseline = slot.idleOrientation
         ? [...slot.idleOrientation] as QuaternionTuple
         : [...IDENTITY_QUATERNION] as QuaternionTuple
-      slot.calibration = baseline
+      slot.calibration = null
       slot.idleOrientation = baseline
 
       const baselineQuat = toQuaternion(baseline)
@@ -709,6 +725,7 @@ class Session {
       slot.targetOrientation = toTuple(targetRelative)
       slot.orientation = [...IDENTITY_QUATERNION]
       slot.rawOrientation = null
+      slot.absoluteOrientation = [...IDENTITY_QUATERNION]
       slot.finished = false
       slot.progress = 0
       slot.angle = Math.PI
@@ -827,10 +844,68 @@ class Session {
     }, 500)
   }
 
+  private handleMatchVictory(slotIndex: number) {
+    if (this.round.status !== 'active') {
+      return
+    }
+    if (this.round.winnerSlot !== null) {
+      return
+    }
+
+    const slot = this.players[slotIndex]
+    if (!slot) {
+      return
+    }
+
+    this.round.winnerSlot = slotIndex
+    slot.finished = true
+    slot.playing = false
+    slot.progress = 1
+    slot.angle = 0
+    if (slot.targetOrientation) {
+      slot.orientation = [...slot.targetOrientation] as QuaternionTuple
+    }
+
+    if (this.round.shapeId === FINAL_SHAPE_ID) {
+      const absoluteQuat = toQuaternion(slot.absoluteOrientation)
+      log.info('final round absolute orientation captured', {
+        slot: slotIndex,
+        quaternion: toTuple(absoluteQuat).map((value) => Number(value.toFixed(6))),
+      })
+    }
+
+    this.players.forEach((other, index) => {
+      if (index !== slotIndex) {
+        other.playing = false
+      }
+    })
+
+    this.roundEndTime = Date.now() + MATCH_SETTLE_DURATION_MS
+
+    if (this.matchSettleTimeout) {
+      clearTimeout(this.matchSettleTimeout)
+    }
+    this.matchSettleTimeout = setTimeout(() => {
+      this.matchSettleTimeout = null
+      this.completeRound('matched', slotIndex)
+    }, MATCH_SETTLE_DURATION_MS)
+
+    log.info('player matched target shape', {
+      slot: slotIndex,
+      settleMs: MATCH_SETTLE_DURATION_MS,
+    })
+
+    this.broadcastState()
+  }
+
   private completeRound(_reason: 'matched' | 'timeout' | 'aborted', winnerSlot?: number) {
     if (this.round.status !== 'active') {
       log.warn('completeRound invoked while not active', { status: this.round.status })
       return
+    }
+    if (this.matchSettleTimeout) {
+      clearTimeout(this.matchSettleTimeout)
+      this.matchSettleTimeout = null
     }
     this.round.status = 'complete'
     this.round.winnerSlot = typeof winnerSlot === 'number' ? winnerSlot : null
@@ -954,9 +1029,14 @@ class Session {
       return
     }
 
+    if (this.round.winnerSlot !== null) {
+      return
+    }
+
     const absoluteOrientation = toQuaternion(payload)
     const absoluteTuple = toTuple(absoluteOrientation)
     slot.idleOrientation = absoluteTuple
+    slot.absoluteOrientation = absoluteTuple
 
     if (this.round.status !== 'active' && this.round.status !== 'countdown') {
       slot.rawOrientation = raw ?? null
@@ -986,14 +1066,13 @@ class Session {
       const angle = shadowAngleBetween(relativeOrientation, comparisonTarget)
       slot.angle = angle
 
-      if (!slot.finished && angle < this.matchAngleThreshold) {
-        slot.finished = true
-        slot.progress = 1
-        log.info('player matched target shape', { slot: slotIndex, angle })
-        this.completeRound('matched', slotIndex)
-      } else if (!slot.finished) {
-        slot.progress = clampProgress(angle, this.matchAngleThreshold)
+      if (angle < this.matchAngleThreshold) {
+        this.handleMatchVictory(slotIndex)
+        return
       }
+
+      slot.finished = false
+      slot.progress = clampProgress(angle, this.matchAngleThreshold)
     } else {
       const baselineTarget = targetForSlot ?? new Quaternion(...IDENTITY_QUATERNION)
       slot.angle = shadowAngleBetween(relativeOrientation, baselineTarget)

@@ -6,7 +6,7 @@ import type { Material } from 'three'
 import type { Group } from 'three'
 import type { PlayerSnapshot, RoundStatus } from '../shared/messages'
 import type { QuaternionTuple } from '../utils/quaternion'
-import { toQuaternion } from '../utils/quaternion'
+import { IDENTITY_QUATERNION, toQuaternion } from '../utils/quaternion'
 import type { ShapeId } from '../shared/shapes'
 import { FINAL_SHAPE_ID } from '../shared/shapes'
 import { getPlayerColor } from '../shared/playerColors'
@@ -16,7 +16,13 @@ import {
   createSilhouetteOutlineMaterial
 } from '../shaders/silhouetteMaterial'
 
-const cameraFrontPosition: [number, number, number] = [0, 0, 10]
+const CAMERA_DISTANCE = 10
+const CAMERA_FRONT_POSITION: [number, number, number] = [0, 0, CAMERA_DISTANCE]
+const CAMERA_FINAL_POSITION: [number, number, number] = [
+  -CAMERA_DISTANCE * Math.SQRT1_2,
+  0,
+  CAMERA_DISTANCE * Math.SQRT1_2,
+]
 const ORTHO_ZOOM = 100
 const CAMERA_LOOK_AT: [number, number, number] = [0, 0, 0]
 const WALL_POSITION: [number, number, number] = [0, 0, -2]
@@ -42,6 +48,7 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked, zo
     () => (targetOrientation ? toQuaternion(targetOrientation) : null),
     [targetOrientation],
   )
+  const isFinalShape = shapeId === FINAL_SHAPE_ID
   const camera = useThree((state) => state.camera)
   const wallViewport = useThree((state) =>
     state.viewport.getCurrentViewport(state.camera, WALL_TARGET),
@@ -52,7 +59,8 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked, zo
   )
 
   useEffect(() => {
-    camera.position.set(...cameraFrontPosition)
+    const position = isFinalShape ? CAMERA_FINAL_POSITION : CAMERA_FRONT_POSITION
+    camera.position.set(...position)
     camera.lookAt(...CAMERA_LOOK_AT)
     if ('isOrthographicCamera' in camera && camera.isOrthographicCamera) {
       camera.zoom = ORTHO_ZOOM
@@ -60,10 +68,7 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked, zo
       camera.far = 100
       camera.updateProjectionMatrix()
     }
-  }, [camera])
-
-  const isFinalShape = shapeId === FINAL_SHAPE_ID
-
+  }, [camera, isFinalShape])
   const displayQuaternion = useMemo(() => {
     if (!targetQuat || rotationLocked || snapStrength <= 0) {
       return orientationQuat
@@ -235,7 +240,7 @@ function LaneScene({ orientation, targetOrientation, shapeId, rotationLocked, zo
         shadow-bias={-0.0002}
       />
       <spotLight position={[0, 0, 9.8]} angle={0.42} intensity={isFinalShape ? 0.5 : 0.25} penumbra={0.6} castShadow={false} color="#f3f6ff" />
-      <group ref={ghostRef} position={[0, 0, 0]} visible={Boolean(targetQuat)}>
+      <group ref={ghostRef} position={[0, 0, 0]} visible={!isFinalShape && Boolean(targetQuat)}>
         {targetQuat ? (
           <Center>
             <Component variant={isFinalShape ? 'shadow' : 'default'} />
@@ -290,9 +295,17 @@ export function PlayerLane({
   const percentage = Math.round(Math.min(Math.max(player.progress, 0), 1) * 100)
   const isWinner = winnerSlot != null && winnerSlot === player.slot
   const laneMuted = winnerSlot != null && winnerSlot !== player.slot
-  const rotationLocked = (player.finished && roundStatus !== 'waiting' && roundStatus !== 'countdown') || isWinner
-  const zoomIntensity = Math.max(0, Math.min(1, (player.progress - 0.8) / 0.2))
-  const snapStrength = Math.max(0, Math.min(1, (player.progress - 0.97) / 0.03))
+  const finishedDuringRound = player.finished && (roundStatus === 'active' || roundStatus === 'complete')
+  const rotationLocked = roundStatus === 'countdown' || finishedDuringRound || isWinner
+  const orientationForDisplay: QuaternionTuple = roundStatus === 'countdown'
+    ? [...IDENTITY_QUATERNION] as QuaternionTuple
+    : player.orientation
+  const zoomIntensity = roundStatus === 'countdown'
+    ? 0
+    : Math.max(0, Math.min(1, (player.progress - 0.8) / 0.2))
+  const snapStrength = roundStatus === 'countdown'
+    ? 0
+    : Math.max(0, Math.min(1, (player.progress - 0.97) / 0.03))
   const laneTargetOrientation = player.targetOrientation
   const lastLoggedQuaternion = useRef<QuaternionTuple | null>(null)
 
@@ -317,7 +330,7 @@ export function PlayerLane({
     const quaternion = toQuaternion(current)
     const euler = new Euler().setFromQuaternion(quaternion.clone(), 'XYZ')
     const degreesFactor = 180 / Math.PI
-
+    
     console.log('[Finale orientation]', {
       slot: player.slot,
       quaternion: current.map((value) => Number(value.toFixed(6))),
@@ -356,10 +369,15 @@ export function PlayerLane({
           shadows
           orthographic
           dpr={[1, 1.5]}
-          camera={{ position: cameraFrontPosition, zoom: ORTHO_ZOOM, near: 0.1, far: 100 }}
+          camera={{
+            position: shapeId === FINAL_SHAPE_ID ? CAMERA_FINAL_POSITION : CAMERA_FRONT_POSITION,
+            zoom: ORTHO_ZOOM,
+            near: 0.1,
+            far: 100,
+          }}
         >
           <LaneScene
-            orientation={player.orientation}
+            orientation={orientationForDisplay}
             targetOrientation={laneTargetOrientation}
             shapeId={shapeId}
             rotationLocked={rotationLocked}

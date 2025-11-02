@@ -16,8 +16,6 @@ import { eulerFromDeviceOrientation, toTuple } from './utils/quaternion'
 import { getPlayerColor } from './shared/playerColors'
 import slotTick from './assets/slot-tick.mp3'
 import roundWon from './assets/round-won.mp3'
-import clickSfx from './assets/click.mp3'
-import loopTrack from './assets/loop.mp3'
 import joinLobbyChime from './assets/join-lobby.mp3'
 import leaveLobbyChime from './assets/leave-lobby.mp3'
 
@@ -57,11 +55,11 @@ function HostDashboard() {
   const [multiplierInput, setMultiplierInput] = useState(sessionState.lobby.finalRoundMultiplier || 3)
   const [showSetup, setShowSetup] = useState(() => self.role !== 'host' || sessionState.lobby.status === 'idle')
   const [copyFeedback, setCopyFeedback] = useState<'code' | 'url' | null>(null)
-  const clickSoundRef = useRef<HTMLAudioElement | null>(null)
   const loopAudioRef = useRef<HTMLAudioElement | null>(null)
   const loopFadeTargetRef = useRef<{ volume: number; playbackRate: number } | null>(null)
   const loopContextRef = useRef({ roundStatus: sessionState.round.status, lobbyStatus: sessionState.lobby.status })
   const copyResetTimeoutRef = useRef<number | null>(null)
+
 
   useEffect(() => {
     if (self.role === 'host' && sessionState.lobby.status !== 'idle') {
@@ -89,20 +87,6 @@ function HostDashboard() {
     setCopyFeedback(null)
   }, [sessionState.lobby.code])
 
-  useEffect(() => {
-    clickSoundRef.current = typeof Audio !== 'undefined' ? new Audio(clickSfx) : null
-    if (typeof Audio !== 'undefined') {
-      const audio = new Audio(loopTrack)
-      audio.loop = true
-      audio.volume = 0
-      audio.playbackRate = 1
-      loopAudioRef.current = audio
-    }
-    return () => {
-      loopAudioRef.current?.pause()
-      loopAudioRef.current = null
-    }
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -111,15 +95,6 @@ function HostDashboard() {
         copyResetTimeoutRef.current = null
       }
     }
-  }, [])
-
-  const playClick = useCallback(() => {
-    const audio = clickSoundRef.current
-    if (!audio) {
-      return
-    }
-    audio.currentTime = 0
-    void audio.play().catch(() => {})
   }, [])
 
   const scheduleLoopTarget = useCallback((volume: number, playbackRate: number) => {
@@ -249,12 +224,12 @@ function HostDashboard() {
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const safeRounds = Math.max(3, Math.min(10, Math.round(roundsInput)))
-      const safeTimer = Math.max(15, Math.min(300, Math.round(timerInput)))
+      const safeTimer = Math.max(30, Math.min(300, Math.round(timerInput / 10) * 10))
       const safeMultiplier = Math.max(1, Math.min(10, Math.round(multiplierInput)))
-      playClick()
+    
       createLobby(safeTimer, safeRounds, safeMultiplier)
     },
-    [createLobby, multiplierInput, playClick, roundsInput, timerInput],
+    [createLobby, multiplierInput, roundsInput, timerInput],
   )
 
   const spinnerState = useShapeSlotSpinner({
@@ -315,7 +290,6 @@ function HostDashboard() {
   })()
   const hasLobbyCode = Boolean(sessionState.lobby.code)
   const lobbyCodeDisplay = sessionState.lobby.code ?? '------'
-  const codeCopyHint = copyFeedback === 'code' ? 'Copied!' : hasLobbyCode ? 'Click to copy' : 'Waiting…'
   const roundDurationMs = sessionState.round.durationSeconds * 1000
   const timerRatio =
     roundStatus === 'active' && roundDurationMs > 0
@@ -451,39 +425,39 @@ function HostDashboard() {
   if (showSetup) {
     return (
       <div className="page host-setup">
+        <img src="../src/assets/bg.png" alt="bg" className="host-bg" />
         <div className="host-card">
-          <h1>Shadow Shapes Lobby</h1>
+          <h1>Configure your Lobby</h1>
           <p className="host-subtitle">Configure your race and share the code with your players.</p>
           <form className="host-form" onSubmit={handleCreateLobby}>
-            <label className="input-group">
-              <span>Round timer (seconds)</span>
-              <input
-                type="number"
-                min={15}
-                max={300}
-                value={timerInput}
-                onChange={(event) => setTimerInput(Number(event.target.value))}
-              />
+            <label className="input-group range">
+              <span>Round timer</span>
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={30}
+                  max={300}
+                  step={10}
+                  value={timerInput}
+                  onChange={(event) => setTimerInput(Number(event.target.value))}
+                  aria-valuetext={`${timerInput} seconds`}
+                />
+                <span className="range-value">{timerInput}s</span>
+              </div>
             </label>
-            <label className="input-group">
+            <label className="input-group range">
               <span>Number of rounds</span>
-              <input
-                type="number"
-                min={3}
-                max={10}
-                value={roundsInput}
-                onChange={(event) => setRoundsInput(Number(event.target.value))}
-              />
-            </label>
-            <label className="input-group">
-              <span>Final figure multiplier</span>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={multiplierInput}
-                onChange={(event) => setMultiplierInput(Number(event.target.value))}
-              />
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={3}
+                  max={10}
+                  step={1}
+                  value={roundsInput}
+                  onChange={(event) => setRoundsInput(Number(event.target.value))}
+                />
+                <span className="range-value">{roundsInput}</span>
+              </div>
             </label>
             <button type="submit" className="hud-button accent host-submit">
               Create lobby
@@ -516,12 +490,6 @@ function HostDashboard() {
           <span className={`status-pill status-${roundStatus}`}>{statusLabel}</span>
           <span className="divider" />
           <span className="hud-meta">Players {sessionState.connectedPlayerCount}</span>
-          {sessionState.lobby.code ? (
-            <>
-              <span className="divider" />
-              <span className="hud-meta">Code {sessionState.lobby.code}</span>
-            </>
-          ) : null}
           {showGameView ? (
             <>
               <span className="divider" />
@@ -539,7 +507,6 @@ function HostDashboard() {
                 type="button"
                 className="hud-button accent"
                 onClick={() => {
-                  playClick()
                   ensureLoopPlaying()
                   startGame()
                 }}
@@ -580,8 +547,7 @@ function HostDashboard() {
 
       {showLobbyView ? (
         <section className="lobby-layout">
-          <div className="lobby-column">
-            <h2 className="lobby-players-header">Players</h2>
+          <div className="lobby-column lobby-players">
             {connectedPlayers.length > 0 ? (
               <div className="lobby-player-grid">{connectedPlayers.map(renderPlayerBubble)}</div>
             ) : (
@@ -590,33 +556,34 @@ function HostDashboard() {
           </div>
           <div className="lobby-column lobby-instructions">
             <h2>Connect your phones as controllers</h2>
-            <p>Type in the code below:</p>
-            <div
-              className="lobby-code-block"
-              role={hasLobbyCode ? 'button' : undefined}
-              tabIndex={hasLobbyCode ? 0 : undefined}
-              data-clickable={hasLobbyCode}
-              data-copied={copyFeedback === 'code'}
-              onClick={() => {
-                if (!hasLobbyCode) {
-                  return
-                }
-                copyToClipboard(sessionState.lobby.code, 'code')
-              }}
-              onKeyDown={(event) => {
-                if (!hasLobbyCode) {
-                  return
-                }
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
+            <div className="lobby-code-block-wrap">
+              <p>Type in the code below:</p>
+              <div
+                className="lobby-code-block"
+                role={hasLobbyCode ? 'button' : undefined}
+                tabIndex={hasLobbyCode ? 0 : undefined}
+                data-clickable={hasLobbyCode}
+                data-copied={copyFeedback === 'code'}
+                onClick={() => {
+                  if (!hasLobbyCode) {
+                    return
+                  }
                   copyToClipboard(sessionState.lobby.code, 'code')
-                }
-              }}
-            >
-              <span className="lobby-code-value">{lobbyCodeDisplay}</span>
-              <span className="lobby-copy-hint">{codeCopyHint}</span>
+                }}
+                onKeyDown={(event) => {
+                  if (!hasLobbyCode) {
+                    return
+                  }
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    copyToClipboard(sessionState.lobby.code, 'code')
+                  }
+                }}
+              >
+                <span className="lobby-code-value">{lobbyCodeDisplay}</span>
+              </div>
             </div>
-            {joinUrl ? <p className="lobby-instructions-link">{joinUrl}</p> : null}
+            
             {sessionState.lobby.code ? (
               <div className="lobby-qr-wrap">
                 <span className="lobby-qr-caption">Or scan:</span>
@@ -655,7 +622,6 @@ function HostDashboard() {
         <section className="results-section">
           <ResultsDashboard
             players={sessionState.players}
-            finalMultiplier={sessionState.lobby.finalRoundMultiplier}
           />
         </section>
       ) : null}
@@ -839,6 +805,8 @@ function JoinScreen() {
         <div className="scanner-overlay">
           <div className="scanner-frame">
             <Scanner
+              sound={false}
+              components={{torch: false}}
               constraints={{ facingMode: 'environment' }}
               onScan={(codes: IDetectedBarcode[]) => handleScan(codes[0]?.rawValue ?? null)}
               onError={handleScanError}
@@ -1044,8 +1012,8 @@ function QRPreview({ value }: { value: string }) {
       margin: 1,
       width: 160,
       color: {
-        dark: '#9eeaff',
-        light: '#00000000',
+        dark: '#090e1c',
+        light: '#cfe6ff',
       },
     }).catch(() => {
       const context = canvas.getContext('2d')

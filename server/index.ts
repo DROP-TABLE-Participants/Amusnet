@@ -76,6 +76,61 @@ const generateLobbyCode = (): string => {
   return digits.toString().padStart(CODE_LENGTH, '0')
 }
 
+const serializeShapes = (shapes: GeneratedShapeDefinition[]) =>
+  shapes.map((shape) => ({
+    id: shape.id,
+    label: shape.label,
+    description: shape.description,
+    primitives: shape.primitives.map((primitive) => ({
+      kind: primitive.kind,
+      position: primitive.position ? [...primitive.position] as [number, number, number] : undefined,
+      rotation: primitive.rotation ? [...primitive.rotation] as [number, number, number] : undefined,
+      scale: Array.isArray(primitive.scale)
+        ? [...primitive.scale] as [number, number, number]
+        : primitive.scale,
+      args: primitive.args ? [...primitive.args] : undefined,
+    })),
+  }))
+
+const createInitialSnapshot = (): SessionStatePayload => ({
+  lobby: {
+    status: 'idle',
+    code: null,
+    timerSeconds: 60,
+    totalRounds: 3,
+    finalRoundMultiplier: 3,
+    shapesReady: GENERATED_SHAPES.length > 0,
+  },
+  shapes: serializeShapes(GENERATED_SHAPES),
+  players: Array.from({ length: 4 }, (_, slot) => ({
+    slot,
+    connected: false,
+    ready: false,
+    playing: false,
+    finished: false,
+    score: 0,
+    name: null,
+    angle: Math.PI,
+    progress: 0,
+    orientation: [...IDENTITY_QUATERNION] as QuaternionTuple,
+    targetOrientation: null,
+    rawOrientation: null,
+  })),
+  round: {
+    status: 'waiting',
+    shapeId: null,
+    targetOrientation: null,
+    index: 0,
+    total: 0,
+    durationSeconds: 60,
+    remainingMs: 0,
+    countdownMs: 0,
+    winnerSlot: null,
+  },
+  readyCount: 0,
+  connectedPlayerCount: 0,
+})
+
 type DeviceType = 'mobile' | 'desktop'
 
 type ClientRecord = {
@@ -84,6 +139,7 @@ type ClientRecord = {
   device: DeviceType
   role: 'viewer' | 'player' | 'host'
   slot?: number
+  sessionId: string | null
 }
 
 type PlayerSlot = {
@@ -111,7 +167,13 @@ type RoundState = {
   winnerSlot: number | null
 }
 
+type SessionCallbacks = {
+  onCodeChange: (code: string | null) => void
+}
+
 class Session {
+  private readonly callbacks: SessionCallbacks
+  private readonly sessionId: string
   private clients = new Map<string, ClientRecord>()
   private players: PlayerSlot[] = Array.from({ length: 4 }, (_, slot) => ({
     slot,
@@ -154,35 +216,26 @@ class Session {
   private countdownTicker: NodeJS.Timeout | null = null
   private matchSettleTimeout: NodeJS.Timeout | null = null
   private availableShapes: GeneratedShapeDefinition[] = Array.from(GENERATED_SHAPES)
+    constructor(callbacks: SessionCallbacks, sessionId: string) {
+      this.callbacks = callbacks
+      this.sessionId = sessionId
+    }
+
+    get id(): string {
+      return this.sessionId
+    }
   private roundShapeSequence: GeneratedShapeDefinition[] = Array.from(GENERATED_SHAPES)
   private shapeGenerationRequestId = 0
   private shapesReady = GENERATED_SHAPES.length > 0
   private pendingStartAfterShapes = false
 
-  addClient(socket: WebSocket) {
-    const id = nanoid()
-    const client: ClientRecord = { id, socket, device: 'desktop', role: 'viewer' }
-    this.clients.set(id, client)
-
-    log.info('client connected', { clientId: id, totalClients: this.clients.size })
-
-    socket.on('message', (buffer) => {
-      this.handleMessage(client, buffer)
-    })
-
-    socket.on('close', () => {
-      this.removeClient(id)
-    })
-
-    socket.on('error', () => {
-      log.warn('socket error received, removing client', { clientId: id })
-      this.removeClient(id)
-    })
-
+  registerClient(client: ClientRecord) {
+    this.clients.set(client.id, client)
+    client.sessionId = this.sessionId
     this.sendStateToClient(client)
   }
 
-  private removeClient(clientId: string) {
+  unregisterClient(clientId: string) {
     const client = this.clients.get(clientId)
     if (!client) {
       return
@@ -199,9 +252,17 @@ class Session {
     }
 
     this.clients.delete(clientId)
-    log.debug('active client count updated', { totalClients: this.clients.size })
+    client.sessionId = null
     this.rebalanceRound()
     this.broadcastState()
+  }
+
+  getClients(): Iterable<ClientRecord> {
+    return this.clients.values()
+  }
+
+  isHost(clientId: string): boolean {
+    return this.hostId === clientId
   }
 
   private resetLobbyState() {
@@ -230,6 +291,7 @@ class Session {
     this.shapesReady = GENERATED_SHAPES.length > 0
     this.pendingStartAfterShapes = false
     this.resetPlayers()
+    this.callbacks.onCodeChange(null)
   }
 
   private clearRoundTimers() {
@@ -391,35 +453,8 @@ class Session {
     })
   }
 
-  private handleMessage(client: ClientRecord, buffer: RawData) {
-    let message: ClientMessage | null = null
-    try {
-      message = JSON.parse(buffer.toString()) as ClientMessage
-    } catch {
-      return
-    }
-
+  handleMessage(client: ClientRecord, message: ClientMessage) {
     switch (message.type) {
-      case 'register':
-        log.debug('registering client device', { clientId: client.id, device: message.device })
-        client.device = message.device
-        break
-      case 'create-lobby':
-        log.info('host requested lobby creation', {
-          clientId: client.id,
-          timerSeconds: message.timerSeconds,
-          totalRounds: message.totalRounds,
-          finalMultiplier: message.finalMultiplier,
-        })
-        this.handleCreateLobby(client, message.timerSeconds, message.totalRounds, message.finalMultiplier)
-        break
-      case 'join-lobby':
-        log.info('join lobby request received', {
-          clientId: client.id,
-          code: message.code,
-        })
-        this.handleJoinLobby(client, message.code, message.name)
-        break
       case 'start-game':
         log.info('start game requested', { clientId: client.id })
         this.handleStartGame(client)
@@ -447,7 +482,7 @@ class Session {
     }
   }
 
-  private handleCreateLobby(client: ClientRecord, timerSeconds: number, totalRounds: number, finalMultiplier: number) {
+  createLobby(client: ClientRecord, code: string, timerSeconds: number, totalRounds: number, finalMultiplier: number) {
     if (client.device !== 'desktop') {
       log.warn('lobby creation rejected for non-desktop client', { clientId: client.id })
       return
@@ -480,7 +515,7 @@ class Session {
 
     this.lobby = {
       status: 'open',
-      code: generateLobbyCode(),
+      code,
       timerSeconds: clampedTimer,
       totalRounds: clampedRounds,
       finalRoundMultiplier: clampedMultiplier,
@@ -498,6 +533,7 @@ class Session {
     })
 
     this.prepareShapes(clampedRounds)
+    this.callbacks.onCodeChange(code)
     this.broadcastState()
   }
 
@@ -546,10 +582,10 @@ class Session {
     this.broadcastState()
   }
 
-  private handleJoinLobby(client: ClientRecord, code: string, name: string) {
+  joinLobby(client: ClientRecord, code: string, name: string): boolean {
     if (client.device !== 'mobile') {
       log.warn('join lobby rejected for non-mobile client', { clientId: client.id })
-      return
+      return false
     }
     if (this.lobby.status !== 'open' || !this.lobby.code || code.trim() !== this.lobby.code) {
       log.warn('join lobby rejected due to invalid code or lobby status', {
@@ -557,20 +593,22 @@ class Session {
         providedCode: code,
         lobbyStatus: this.lobby.status,
       })
-      return
+      return false
     }
     if (typeof client.slot === 'number') {
       log.warn('client already in a slot attempted to join again', { clientId: client.id, slot: client.slot })
-      return
+      return false
     }
 
     const assigned = this.assignPlayerSlot(client, name)
     if (assigned) {
       log.info('player joined lobby slot', { clientId: client.id, slot: client.slot })
       this.broadcastState()
-    } else {
-      log.warn('no available slots for joining player', { clientId: client.id })
+      return true
     }
+
+    log.warn('no available slots for joining player', { clientId: client.id })
+    return false
   }
 
   private handleStartGame(client: ClientRecord) {
@@ -1104,20 +1142,7 @@ class Session {
         finalRoundMultiplier: this.lobby.finalRoundMultiplier,
         shapesReady: this.shapesReady,
       },
-      shapes: this.availableShapes.map((shape) => ({
-        id: shape.id,
-        label: shape.label,
-        description: shape.description,
-        primitives: shape.primitives.map((primitive) => ({
-          kind: primitive.kind,
-          position: primitive.position ? [...primitive.position] as [number, number, number] : undefined,
-          rotation: primitive.rotation ? [...primitive.rotation] as [number, number, number] : undefined,
-          scale: Array.isArray(primitive.scale)
-            ? [...primitive.scale] as [number, number, number]
-            : primitive.scale,
-          args: primitive.args ? [...primitive.args] : undefined,
-        })),
-      })),
+      shapes: serializeShapes(this.availableShapes),
       players: this.players.map<PlayerSnapshot>((slot) => ({
         slot: slot.slot,
         connected: slot.clientId !== null,
@@ -1195,6 +1220,259 @@ class Session {
   }
 }
 
+class SessionManager {
+  private sessions = new Map<string, Session>()
+  private sessionCodes = new Map<string, string | null>()
+  private codeToSessionId = new Map<string, string>()
+  private clients = new Map<string, ClientRecord>()
+
+  addConnection(socket: WebSocket) {
+    const id = nanoid()
+    const client: ClientRecord = {
+      id,
+      socket,
+      device: 'desktop',
+      role: 'viewer',
+      sessionId: null,
+    }
+    this.clients.set(id, client)
+
+    log.info('client connected', { clientId: id, totalClients: this.clients.size })
+
+    socket.on('message', (buffer) => {
+      this.handleSocketMessage(client, buffer)
+    })
+
+    socket.on('close', () => {
+      this.handleSocketClose(client)
+    })
+
+    socket.on('error', () => {
+      log.warn('socket error received, closing client', { clientId: id })
+      this.handleSocketClose(client)
+    })
+
+    this.sendIdleState(client)
+  }
+
+  private handleSocketMessage(client: ClientRecord, buffer: RawData) {
+    let message: ClientMessage | null = null
+    try {
+      message = JSON.parse(buffer.toString()) as ClientMessage
+    } catch {
+      return
+    }
+
+    switch (message.type) {
+      case 'register':
+        client.device = message.device
+        break
+      case 'create-lobby':
+        this.handleCreateLobby(client, message.timerSeconds, message.totalRounds, message.finalMultiplier)
+        break
+      case 'join-lobby':
+        this.handleJoinLobby(client, message.code, message.name)
+        break
+      case 'start-game':
+      case 'restart-game':
+      case 'leave-slot':
+      case 'orientation':
+        this.forwardToSession(client, message)
+        break
+      default:
+        log.warn('received unknown client message', { clientId: client.id, message })
+        break
+    }
+  }
+
+  private handleSocketClose(client: ClientRecord) {
+    if (client.sessionId) {
+      const session = this.sessions.get(client.sessionId)
+      if (session) {
+        session.unregisterClient(client.id)
+        this.detachSessionIfEmpty(session)
+      }
+    }
+
+    this.clients.delete(client.id)
+    log.info('client connection closed', { clientId: client.id, remainingClients: this.clients.size })
+  }
+
+  private handleCreateLobby(client: ClientRecord, timerSeconds: number, totalRounds: number, finalMultiplier: number) {
+    if (client.device !== 'desktop') {
+      log.warn('create lobby ignored for non-desktop client', { clientId: client.id })
+      return
+    }
+
+    let session: Session | null = null
+    if (client.sessionId) {
+      const existing = this.sessions.get(client.sessionId) ?? null
+      if (existing && existing.isHost(client.id)) {
+        session = existing
+      } else {
+        this.detachClientFromSession(client, false)
+      }
+    }
+
+    if (!session) {
+      session = this.createSession()
+    }
+
+    session.registerClient(client)
+
+    const code = this.generateUniqueCode()
+    session.createLobby(client, code, timerSeconds, totalRounds, finalMultiplier)
+  }
+
+  private handleJoinLobby(client: ClientRecord, rawCode: string, name: string) {
+    const code = rawCode.trim()
+    if (!code) {
+      log.warn('join lobby rejected due to empty code', { clientId: client.id })
+      return
+    }
+
+    const sessionId = this.codeToSessionId.get(code)
+    if (!sessionId) {
+      log.warn('join lobby rejected due to unknown code', { clientId: client.id, code })
+      return
+    }
+
+    const session = this.sessions.get(sessionId)
+    if (!session) {
+      this.codeToSessionId.delete(code)
+      log.warn('session lookup failed for code, removing mapping', { code })
+      return
+    }
+
+    if (client.sessionId && client.sessionId !== sessionId) {
+      this.detachClientFromSession(client, false)
+    }
+
+    if (client.sessionId !== sessionId) {
+      session.registerClient(client)
+    }
+
+    const joined = session.joinLobby(client, code, name)
+    if (!joined) {
+      session.unregisterClient(client.id)
+      client.role = 'viewer'
+      client.slot = undefined
+      client.sessionId = null
+      this.sendIdleState(client)
+    }
+  }
+
+  private forwardToSession(client: ClientRecord, message: ClientMessage) {
+    if (!client.sessionId) {
+      log.warn('message ignored because client not attached to session', { clientId: client.id, type: message.type })
+      return
+    }
+    const session = this.sessions.get(client.sessionId)
+    if (!session) {
+      log.warn('message ignored because session not found', { clientId: client.id, sessionId: client.sessionId })
+      return
+    }
+    session.handleMessage(client, message)
+  }
+
+  private detachClientFromSession(client: ClientRecord, sendIdle: boolean) {
+    if (!client.sessionId) {
+      if (sendIdle) {
+        this.sendIdleState(client)
+      }
+      return
+    }
+    const session = this.sessions.get(client.sessionId)
+    if (session) {
+      session.unregisterClient(client.id)
+      this.detachSessionIfEmpty(session)
+    }
+    client.role = 'viewer'
+    client.slot = undefined
+    client.sessionId = null
+    if (sendIdle) {
+      this.sendIdleState(client)
+    }
+  }
+
+  private detachSessionIfEmpty(session: Session) {
+    for (const _ of session.getClients()) {
+      return
+    }
+    this.destroySession(session)
+  }
+
+  private destroySession(session: Session) {
+    const remaining = Array.from(session.getClients())
+    remaining.forEach((client) => {
+      session.unregisterClient(client.id)
+      client.role = 'viewer'
+      client.slot = undefined
+      client.sessionId = null
+      this.sendIdleState(client)
+    })
+    const sessionId = session.id
+    const currentCode = this.sessionCodes.get(sessionId)
+    if (currentCode) {
+      this.codeToSessionId.delete(currentCode)
+    }
+    this.sessionCodes.delete(sessionId)
+    this.sessions.delete(sessionId)
+    log.info('destroyed empty session', { sessionId })
+  }
+
+  private createSession(): Session {
+    const sessionId = nanoid()
+    const session = new Session(
+      {
+        onCodeChange: (code) => this.updateSessionCode(sessionId, code),
+      },
+      sessionId,
+    )
+    this.sessions.set(sessionId, session)
+    this.sessionCodes.set(sessionId, null)
+    log.debug('created new session', { sessionId })
+    return session
+  }
+
+  private updateSessionCode(sessionId: string, code: string | null) {
+    const previous = this.sessionCodes.get(sessionId)
+    if (previous) {
+      this.codeToSessionId.delete(previous)
+    }
+    if (code) {
+      this.codeToSessionId.set(code, sessionId)
+    }
+    this.sessionCodes.set(sessionId, code ?? null)
+  }
+
+  private generateUniqueCode(): string {
+    let attempts = 0
+    let code = generateLobbyCode()
+    while (this.codeToSessionId.has(code)) {
+      code = generateLobbyCode()
+      attempts += 1
+      if (attempts > 1000) {
+        throw new Error('unable to generate unique lobby code')
+      }
+    }
+    return code
+  }
+
+  private sendIdleState(client: ClientRecord) {
+    if (client.socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+    const snapshot = createInitialSnapshot()
+    const message: ServerMessage = {
+      type: 'session-state',
+      state: snapshot,
+      self: { role: 'viewer' },
+    }
+    client.socket.send(JSON.stringify(message))
+  }
+}
+
 type TlsConfig = { key: Buffer; cert: Buffer }
 
 const loadTlsConfig = (): TlsConfig | null => {
@@ -1219,7 +1497,7 @@ const loadTlsConfig = (): TlsConfig | null => {
   }
 }
 
-const session = new Session()
+const manager = new SessionManager()
 
 async function startServer() {
   const tlsConfig = loadTlsConfig()
@@ -1229,7 +1507,7 @@ async function startServer() {
     const wss = new WebSocketServer({ server: httpsServer })
 
     wss.on('connection', (socket) => {
-      session.addClient(socket)
+      manager.addConnection(socket)
     })
 
     wss.on('error', (error: unknown) => {
@@ -1248,7 +1526,7 @@ async function startServer() {
     const wss = new WebSocketServer({ server: httpServer })
 
     wss.on('connection', (socket) => {
-      session.addClient(socket)
+      manager.addConnection(socket)
     })
 
     wss.on('error', (error: unknown) => {
